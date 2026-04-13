@@ -90,12 +90,12 @@ Source of truth: `spec.md` (280 lines) and `CLAUDE.md`. Every task below traces 
 
 **Goal**: First visible feature. Proves the full Claude integration path.
 
-- [ ] Task statement detail route `/study/task/[id]`
-- [ ] Verbatim render of Knowledge and Skills bullets (preserving exam wording per DO-NOT #6)
-- [ ] Claude-generated narrative prompt: takes bullets, returns a Markdown narrative with concrete examples
-- [ ] Narrative is cached in DB on first render; subsequent visits issue zero Claude calls (**AT2 + AT11 partially**)
-- [ ] Inline "check your understanding" — a short MCQ (2–3 questions) at the end; answers write progress events
-- [ ] Typography: comfortable reading width, proper code blocks (NFR5.3)
+- [x] Task statement detail route `/study/task/[id]`
+- [x] Verbatim render of Knowledge and Skills bullets (preserving exam wording per DO-NOT #6)
+- [x] Claude-generated narrative prompt: takes bullets, returns a Markdown narrative with concrete examples
+- [x] Narrative is cached in DB on first render; subsequent visits issue zero Claude calls (**AT2 + AT11 partially**)
+- [x] Inline "check your understanding" — a short MCQ (2–3 questions) at the end; answers write progress events
+- [x] Typography: comfortable reading width, proper code blocks (NFR5.3)
 
 **Done when**: AT2 passes. Visiting `/study/task/2.1` twice shows the narrative, and only the first visit makes a Claude call (verifiable in cost log).
 
@@ -307,7 +307,17 @@ Source of truth: `spec.md` (280 lines) and `CLAUDE.md`. Every task below traces 
   - **Tests**: 73 total, all green (was 46). Added `tests/mastery-math.test.ts` (21 cases: weight sums, decay at half-lives, clock-skew clamp, zero-events, all-correct, all-wrong, decay-dominated scoring, half-life override, mastery threshold edges, TS summary weighting, domain mean) and `tests/progress-events.test.ts` (6 cases: append+snapshot, FR4 10-correct-Understand → score>80, bloom-level isolation, task-statement isolation, decay, upsert).
   - **Phase 3 acceptance verified live**: seeded 40 events against `data/app.sqlite` and `curl /api/debug/mastery` returned correct shape — `D1.1` snapshots `L1=100/n=10 (mastered)`, `L2=91.7/n=12 (mastered)`, `L3=88.2/n=10 (mastered)`, `L4=13.5/n=8 (not mastered)`, TS summary 11.8/100, domain roll-up 1.69 (avg of 7 TS within D1). Seed data wiped after verification; app DB back to clean state.
   - **Intentionally deferred**: ceiling computation (the "next level to attempt" selector) is implicit via `isMastered` — explicit ceiling API lands in Phase 7 when the Bloom ladder UI needs it. Exponential backoff for snapshot recomputation on huge event histories (not needed at single-user scale). Per-domain weight display — current UI doesn't show any mastery yet, so the weighting debate can wait until Phase 7.
-- Phase 4 — pending
+- Phase 4 — ✅ complete 2026-04-13 (live AT2 round-trip blocked on user adding an API key via /settings; automated cache test passes)
+  - **Schema**: added `task_statements.narrative_md` + `narrative_generated_at` via `drizzle/0003_shiny_quicksilver.sql` — narrative lives as a nullable column on the TS row; no new table needed since it's strictly one-to-one.
+  - **Explainer role** (`lib/claude/roles/explainer.ts`): single-tool role. `emit_explainer` takes `{narrative_md, check_questions: [{stem, options[4], correct_index, explanation, bloom_level, bloom_justification}] × 2-3}`. Zod schema is the source of truth; inline JSON Schema for the Anthropic tool API is a mirror. `RoleDefinition.tools` widened to `ToolDefinition<any, any>[]` — roles legitimately hold heterogenous tool shapes.
+  - **Prompt** (`prompts/explainer.md`): frontmatter id `explainer.narrative`, inputs `[title, knowledge_bullets, skills_bullets]`. System prompt emphasizes verbatim bullet quotation (DO-NOT #6), mixed Bloom levels (≥1 at L2, ≥1 at L3), and explicit distractor analysis in explanations.
+  - **Generator** (`lib/study/explainer.ts`): `getOrGenerateExplainer(taskStatementId, {db?, forceRegenerate?})` — returns cached if present, else calls Claude with `toolChoice: {type: 'tool', name: 'emit_explainer'}` + `cacheSystem: true` (NFR4.3), validates the tool_use input via zod, persists narrative on TS row and inserts questions with `source='generated'` in a single transaction. `ExplainerError` wraps three failure modes: `not_found`, `bad_tool_output`, `no_tool_use`.
+  - **APIs**: `POST /api/study/explainer {taskStatementId, forceRegenerate?}` returns the artifact; maps `NoApiKeyError` → 400 with `settings_url`, `ExplainerError.not_found` → 404, `bad_tool_output`/`no_tool_use` → 502. `POST /api/progress {kind, taskStatementId, bloomLevel, success, payload?}` wraps `writeProgressEvent` — unblocks Phase 5 MCQ drill too.
+  - **UI** (`app/study/task/[id]/`): server component renders TS header + verbatim bullets + passes cached artifact to client. `StudyTaskDetail.tsx` client shows "Generate narrative" CTA when no cache, renders via `react-markdown + remark-gfm + prose` classes (Tailwind typography plugin v0.5.19 wired in `app/globals.css` with `@plugin "@tailwindcss/typography"`) when cached, and renders 2-3 `CheckQuestion` cards that POST progress events on submit. Home page now lists all 30 task statements grouped by domain.
+  - **Tests**: 88 total, all green (was 73). Added `tests/explainer-tool.test.ts` (8 cases: valid input, short narrative rejected, <2 or >3 questions rejected, wrong option count, bloom out of range, correct_index out of range, JSON Schema shape, zod parity) and `tests/explainer-generator.test.ts` (6 cases: first call persists narrative+questions, second call is cached with zero Claude invocations per AT11, `forceRegenerate` re-calls, not_found short-circuits before Claude, bad_tool_output surfaces validation errors, missing tool_use surfaces no_tool_use). `tests/ingest-persist.test.ts` updated to apply all migrations (was pinned to 0000 only, broke on the 0003 schema change).
+  - **Lint + typecheck clean.**
+  - **Live verification**: dev server started, `/study/task/D1.1` renders 200 with verbatim bullets + "Open settings" CTA (no key configured in DB currently). Real AT2 round-trip requires the user to paste an API key at `/settings`; once they do, the automated-cache test in `explainer-generator.test.ts` proves the caching behavior end-to-end (mocks Claude, asserts exactly one invocation across two `getOrGenerateExplainer` calls).
+  - **Intentionally deferred**: streaming narrative render (Phase 9 applies streaming to the tutor; the explainer doesn't need it — single tool_use response is fine); narrative regeneration UI button (generator supports `forceRegenerate`, just not wired to UI); the narrative's Claude call currently runs synchronously during the POST — if generation latency becomes a UX issue we'll revisit with SSE or a "generating…" poll loop.
 - Phase 5 — pending
 - Phase 6 — pending
 - Phase 7 — pending

@@ -15,21 +15,19 @@ import { schema } from "../lib/db";
 import { buildSyntheticGuide } from "./fixtures/exam-guide-synthetic";
 
 const DRIZZLE_DIR = resolve(process.cwd(), "drizzle");
-const INITIAL_MIGRATION = readdirSync(DRIZZLE_DIR)
-  .filter((f) => f.startsWith("0000_") && f.endsWith(".sql"))
-  .sort()[0];
-if (!INITIAL_MIGRATION) {
-  throw new Error("no initial migration found under drizzle/");
+
+function allMigrationsSql(): string {
+  return readdirSync(DRIZZLE_DIR)
+    .filter((f) => f.endsWith(".sql"))
+    .sort()
+    .map((f) => readFileSync(resolve(DRIZZLE_DIR, f), "utf8"))
+    .join("\n");
 }
-const MIGRATION_SQL = readFileSync(
-  resolve(DRIZZLE_DIR, INITIAL_MIGRATION),
-  "utf8",
-);
 
 function freshDb(): { db: Db; close: () => void } {
   const sqlite = new Database(":memory:");
   sqlite.pragma("foreign_keys = ON");
-  for (const stmt of MIGRATION_SQL.split("--> statement-breakpoint")) {
+  for (const stmt of allMigrationsSql().split("--> statement-breakpoint")) {
     const sql = stmt.trim();
     if (sql) sqlite.exec(sql);
   }

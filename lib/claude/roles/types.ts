@@ -17,7 +17,10 @@ export interface RoleDefinition {
   /** Whether to mark the system prompt cacheable (NFR4.3). */
   cacheSystem: boolean;
   /** The narrow tool set this role may call. */
-  tools: ToolDefinition[];
+  // Roles hold tools with heterogenous input/output shapes; erase the
+  // generics at the role surface and let callers validate per-tool.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools: ToolDefinition<any, any>[];
   /**
    * Model preference. "default" → settings.default_model (sonnet tier);
    * "cheap" → settings.cheap_model (haiku tier, used by reviewer + bulk).

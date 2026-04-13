@@ -32,6 +32,10 @@ export const taskStatements = sqliteTable("task_statements", {
     .$type<string[]>()
     .notNull(),
   orderIndex: integer("order_index").notNull(),
+  narrativeMd: text("narrative_md"),
+  narrativeGeneratedAt: integer("narrative_generated_at", {
+    mode: "timestamp_ms",
+  }),
 });
 
 export const scenarios = sqliteTable("scenarios", {
