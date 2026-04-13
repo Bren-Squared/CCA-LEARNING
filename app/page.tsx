@@ -43,6 +43,12 @@ export default async function Home() {
                 Drill
               </Link>
               <Link
+                href="/admin/coverage"
+                className="text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+              >
+                Coverage
+              </Link>
+              <Link
                 href="/settings"
                 className="text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
               >

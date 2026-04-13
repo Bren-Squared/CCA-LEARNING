@@ -26,6 +26,8 @@ export default function DrillSession({
   const [phase, setPhase] = useState<Phase>("answering");
   const [answers, setAnswers] = useState<AnswerRecord[]>([]);
   const [postError, setPostError] = useState<string | null>(null);
+  const [flaggedIds, setFlaggedIds] = useState<Set<string>>(new Set());
+  const [flagError, setFlagError] = useState<string | null>(null);
 
   const current = questions[index];
   const total = questions.length;
@@ -85,6 +87,37 @@ export default function DrillSession({
     if (phase === "done") return;
     setPhase("done");
   }, [phase]);
+
+  const flagCurrent = useCallback(async () => {
+    if (!current) return;
+    if (flaggedIds.has(current.id)) return;
+    setFlagError(null);
+    // Optimistic: mark locally first so the button disables immediately.
+    setFlaggedIds((prev) => new Set(prev).add(current.id));
+    try {
+      const res = await fetch(
+        `/api/questions/${encodeURIComponent(current.id)}/flag`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setFlagError(data.error ?? "could not flag question");
+        // Roll back optimistic mark
+        setFlaggedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(current.id);
+          return next;
+        });
+      }
+    } catch (err) {
+      setFlagError(err instanceof Error ? err.message : "request failed");
+      setFlaggedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(current.id);
+        return next;
+      });
+    }
+  }, [current, flaggedIds]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -297,6 +330,18 @@ export default function DrillSession({
           >
             End drill
           </button>
+          {phase === "reviewing" ? (
+            <button
+              type="button"
+              onClick={() => void flagCurrent()}
+              disabled={flaggedIds.has(current.id)}
+              className="rounded-full border border-amber-300 px-4 py-2 text-sm text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-60 dark:border-amber-800 dark:text-amber-400 dark:hover:bg-amber-950/30"
+            >
+              {flaggedIds.has(current.id)
+                ? "Flagged — retired"
+                : "Flag this question"}
+            </button>
+          ) : null}
         </div>
         <p className="text-xs text-zinc-500">
           Keys: A–{optionLetters[current.options.length - 1]} select · Enter{" "}
@@ -307,6 +352,11 @@ export default function DrillSession({
       {postError ? (
         <p className="text-xs text-red-600 dark:text-red-400">
           progress event failed: {postError}
+        </p>
+      ) : null}
+      {flagError ? (
+        <p className="text-xs text-red-600 dark:text-red-400">
+          flag failed: {flagError}
         </p>
       ) : null}
     </section>
