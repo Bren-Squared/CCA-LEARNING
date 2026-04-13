@@ -235,6 +235,42 @@ export const tutorSessions = sqliteTable("tutor_sessions", {
 });
 
 // ---------------------------------------------------------------------------
+// Bulk question generation jobs (FR3 / D4.5 — Anthropic Batches path)
+// ---------------------------------------------------------------------------
+
+export const bulkGenJobs = sqliteTable("bulk_gen_jobs", {
+  id: text("id").primaryKey(),
+  anthropicBatchId: text("anthropic_batch_id"),
+  status: text("status", {
+    enum: [
+      "pending",
+      "in_progress",
+      "ended",
+      "canceled",
+      "expired",
+      "failed",
+    ],
+  })
+    .notNull()
+    .default("pending"),
+  requestedN: integer("requested_n").notNull(),
+  targets: text("targets", { mode: "json" })
+    .$type<Array<{ customId: string; taskStatementId: string; bloomLevel: number }>>()
+    .notNull(),
+  costProjectedCents: integer("cost_projected_cents").notNull(),
+  costActualCents: integer("cost_actual_cents"),
+  succeededCount: integer("succeeded_count").notNull().default(0),
+  rejectedCount: integer("rejected_count").notNull().default(0),
+  failedCount: integer("failed_count").notNull().default(0),
+  lastError: text("last_error"),
+  submittedAt: integer("submitted_at", { mode: "timestamp_ms" })
+    .notNull()
+    .default(sql`(unixepoch('subsec') * 1000)`),
+  endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+  processedAt: integer("processed_at", { mode: "timestamp_ms" }),
+});
+
+// ---------------------------------------------------------------------------
 // Claude API call log (token usage + cost; feeds the Phase 13 spend page)
 // ---------------------------------------------------------------------------
 
@@ -309,3 +345,5 @@ export type Settings = typeof settings.$inferSelect;
 export type NewSettings = typeof settings.$inferInsert;
 export type ClaudeCallLog = typeof claudeCallLog.$inferSelect;
 export type NewClaudeCallLog = typeof claudeCallLog.$inferInsert;
+export type BulkGenJob = typeof bulkGenJobs.$inferSelect;
+export type NewBulkGenJob = typeof bulkGenJobs.$inferInsert;

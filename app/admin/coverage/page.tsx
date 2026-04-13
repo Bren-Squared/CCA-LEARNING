@@ -1,13 +1,15 @@
 import { asc } from "drizzle-orm";
 import Link from "next/link";
 import { getAppDb, schema } from "@/lib/db";
-import { hasApiKey } from "@/lib/settings";
+import { hasApiKey, readSettings } from "@/lib/settings";
 import {
   buildCoverageReport,
   COVERAGE_BLOOM_LEVELS,
   COVERAGE_TARGET,
   type CoverageBloomLevel,
 } from "@/lib/study/coverage";
+import { listBulkJobs } from "@/lib/study/bulk-gen";
+import BulkSection from "./BulkSection";
 import CoverageFillForm from "./CoverageFillForm";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +27,9 @@ function cellClass(count: number): string {
 export default async function CoveragePage() {
   const db = getAppDb();
   const keyConfigured = hasApiKey(db);
+  const settings = readSettings(db);
   const report = buildCoverageReport(db);
+  const bulkJobs = listBulkJobs(db);
 
   const domains = db
     .select()
@@ -86,6 +90,13 @@ export default async function CoveragePage() {
         <CoverageFillForm
           gapQuestions={report.totals.gapQuestions}
           apiKeyConfigured={keyConfigured}
+        />
+
+        <BulkSection
+          gapQuestions={report.totals.gapQuestions}
+          apiKeyConfigured={keyConfigured}
+          jobs={bulkJobs}
+          ceilingUsd={settings.bulkCostCeilingUsd}
         />
 
         <section className="flex flex-col gap-6">

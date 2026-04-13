@@ -119,16 +119,16 @@ Source of truth: `spec.md` (280 lines) and `CLAUDE.md`. Every task below traces 
 
 **Goal**: The bank fills itself. Dogfoods D1.2, D4.2, D4.3, D4.5, D4.6.
 
-- [ ] `generator` role: inputs (task_statement_id, bloom_level, optional scenario_id); outputs a single question via `emit_question` tool with strict JSON schema
-- [ ] Coordinator-subagent pattern (D1.2): coordinator delegates to scenario-writer, rubric-drafter (for explanation), distractor-generator subagents; then synthesizes
-- [ ] Few-shot: bundle the seed questions from the same scenario (D4.2)
-- [ ] `reviewer` role in isolated context: validates correctness, single-answer, distractor plausibility, Bloom-level accuracy; returns pass/fail + structured feedback (D4.6, **AT12**)
-- [ ] Validation-retry loop: on reviewer failure, retry with the specific validation error appended (D4.4) — max 2 retries, then discard
-- [ ] Coverage target tracking: for each (task_statement × bloom_level 1..5), target ≥ 5 active questions (FR3.7)
-- [ ] Maintenance view at `/admin/coverage` showing gaps and a "generate N" trigger
-- [ ] Batches API path for bulk gap-filling (D4.5) — not used on hot-path, only triggered from admin view
-- [ ] Max 200 questions generated per bulk invocation; pre-flight projects cost and blocks on confirmation when projected > `settings.bulk_cost_ceiling_usd` (the slider from Phase 3)
-- [ ] Flag-as-wrong workflow: user can flag a question during a drill; retires it from rotation (FR3.6)
+- [x] `generator` role: inputs (task_statement_id, bloom_level, optional scenario_id); outputs a single question via `emit_question` tool with strict JSON schema
+- [x] Coordinator-subagent pattern (D1.2): coordinator delegates to scenario-writer, rubric-drafter (for explanation), distractor-generator subagents; then synthesizes
+- [x] Few-shot: bundle the seed questions from the same scenario (D4.2)
+- [x] `reviewer` role in isolated context: validates correctness, single-answer, distractor plausibility, Bloom-level accuracy; returns pass/fail + structured feedback (D4.6, **AT12**)
+- [x] Validation-retry loop: on reviewer failure, retry with the specific validation error appended (D4.4) — max 2 retries, then discard
+- [x] Coverage target tracking: for each (task_statement × bloom_level 1..5), target ≥ 5 active questions (FR3.7)
+- [x] Maintenance view at `/admin/coverage` showing gaps and a "generate N" trigger
+- [x] Batches API path for bulk gap-filling (D4.5) — not used on hot-path, only triggered from admin view
+- [x] Max 200 questions generated per bulk invocation; pre-flight projects cost and blocks on confirmation when projected > `settings.bulk_cost_ceiling_usd` (the slider from Phase 3)
+- [x] Flag-as-wrong workflow: user can flag a question during a drill; retires it from rotation (FR3.6)
 
 **Done when**: AT12 passes (deliberate malformed question rejected). Admin coverage view shows ≥ 5 active questions per (task-statement × levels 1–5) after a bulk run; wall-clock time for bulk generation documented.
 

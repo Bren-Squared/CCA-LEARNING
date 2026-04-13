@@ -1,17 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type Db, getDb, schema } from "../db";
 import type Anthropic from "@anthropic-ai/sdk";
-
-/**
- * Published per-model prices (USD per million tokens). Cache reads are
- * charged at 0.1×, cache writes at 1.25× the base input rate. Unknown
- * models fall through to zero so logging still works.
- */
-const MODEL_PRICES: Record<string, { inUsd: number; outUsd: number }> = {
-  "claude-sonnet-4-6": { inUsd: 3, outUsd: 15 },
-  "claude-opus-4-6": { inUsd: 15, outUsd: 75 },
-  "claude-haiku-4-5-20251001": { inUsd: 1, outUsd: 5 },
-};
+import { BATCH_DISCOUNT, MODEL_PRICES } from "./pricing";
 
 export function estimateCostUsd(
   model: string,
@@ -22,6 +12,7 @@ export function estimateCostUsd(
     | "cache_creation_input_tokens"
     | "cache_read_input_tokens"
   >,
+  options: { batch?: boolean } = {},
 ): number {
   const price = MODEL_PRICES[model];
   if (!price) return 0;
@@ -32,7 +23,8 @@ export function estimateCostUsd(
   const cacheWrite =
     (usage.cache_creation_input_tokens ?? 0) * inputPrice * 1.25;
   const cacheRead = (usage.cache_read_input_tokens ?? 0) * inputPrice * 0.1;
-  return base + output + cacheWrite + cacheRead;
+  const subtotal = base + output + cacheWrite + cacheRead;
+  return options.batch ? subtotal * BATCH_DISCOUNT : subtotal;
 }
 
 export interface CallLogEntry {
@@ -41,10 +33,13 @@ export interface CallLogEntry {
   usage: Anthropic.Usage;
   stopReason: string | null;
   durationMs: number;
+  batch?: boolean;
 }
 
 export function recordCall(entry: CallLogEntry, db: Db = getDb()): void {
-  const cost = estimateCostUsd(entry.model, entry.usage);
+  const cost = estimateCostUsd(entry.model, entry.usage, {
+    batch: entry.batch,
+  });
   db.insert(schema.claudeCallLog)
     .values({
       id: randomUUID(),

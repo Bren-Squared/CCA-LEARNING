@@ -135,21 +135,79 @@ function extractToolInput<T>(
   );
 }
 
-async function callGenerator(
-  ts: typeof schema.taskStatements.$inferSelect,
-  domainId: string,
-  bloomLevel: BloomLevel,
-  scenario: typeof schema.scenarios.$inferSelect | null,
-  seedQuestions: typeof schema.questions.$inferSelect[],
-  retryLog: AttemptLogEntry[],
+export interface GeneratorContext {
+  ts: typeof schema.taskStatements.$inferSelect;
+  scenario: typeof schema.scenarios.$inferSelect | null;
+  seedQuestions: typeof schema.questions.$inferSelect[];
+}
+
+export function loadGeneratorContext(
+  params: { taskStatementId: string; scenarioId?: string },
   db: Db,
-): Promise<EmitQuestionInput> {
+): GeneratorContext {
+  const ts = db
+    .select()
+    .from(schema.taskStatements)
+    .where(eq(schema.taskStatements.id, params.taskStatementId))
+    .get();
+  if (!ts) {
+    throw new GeneratorError(
+      "not_found",
+      `task statement "${params.taskStatementId}" not found`,
+    );
+  }
+
+  const scenario = params.scenarioId
+    ? (db
+        .select()
+        .from(schema.scenarios)
+        .where(eq(schema.scenarios.id, params.scenarioId))
+        .get() ?? null)
+    : null;
+  if (params.scenarioId && !scenario) {
+    throw new GeneratorError(
+      "not_found",
+      `scenario "${params.scenarioId}" not found`,
+    );
+  }
+
+  const seedQuestions = scenario
+    ? db
+        .select()
+        .from(schema.questions)
+        .where(
+          and(
+            eq(schema.questions.scenarioId, scenario.id),
+            eq(schema.questions.source, "seed"),
+          ),
+        )
+        .all()
+    : db
+        .select()
+        .from(schema.questions)
+        .where(
+          and(
+            eq(schema.questions.taskStatementId, ts.id),
+            eq(schema.questions.source, "seed"),
+          ),
+        )
+        .all();
+
+  return { ts, scenario, seedQuestions };
+}
+
+export function buildGeneratorSystemPrompt(
+  ctx: GeneratorContext,
+  bloomLevel: BloomLevel,
+  retryLog: AttemptLogEntry[],
+): string {
+  const { ts, scenario, seedQuestions } = ctx;
   const promptPath = resolve(process.cwd(), "prompts/generator.md");
   const template = loadPromptFile(promptPath);
-  const systemPrompt = template.render({
+  return template.render({
     task_statement_id: ts.id,
     task_statement_title: ts.title,
-    domain_id: domainId,
+    domain_id: ts.domainId,
     knowledge_bullets: formatBullets(ts.knowledgeBullets),
     skills_bullets: formatBullets(ts.skillsBullets),
     target_bloom_level: bloomLevel,
@@ -158,6 +216,31 @@ async function callGenerator(
     fewshot_block: formatFewshotBlock(seedQuestions),
     retry_feedback: formatRetryFeedback(retryLog),
   });
+}
+
+export const GENERATOR_TOOL_PARAMS = {
+  tools: [
+    {
+      name: emitQuestionTool.name,
+      description: emitQuestionTool.description,
+      input_schema: emitQuestionTool.inputSchema,
+    },
+  ] satisfies Anthropic.Tool[],
+  toolChoice: {
+    type: "tool" as const,
+    name: emitQuestionTool.name,
+  },
+  maxTokens: 2048,
+  temperature: 0.4,
+};
+
+async function callGenerator(
+  ctx: GeneratorContext,
+  bloomLevel: BloomLevel,
+  retryLog: AttemptLogEntry[],
+  db: Db,
+): Promise<EmitQuestionInput> {
+  const systemPrompt = buildGeneratorSystemPrompt(ctx, bloomLevel, retryLog);
 
   const message = await callClaude({
     role: "generator",
@@ -166,22 +249,22 @@ async function callGenerator(
     messages: [
       {
         role: "user",
-        content: `Author ONE new MCQ for task statement ${ts.id} at Bloom level ${bloomLevel}${scenario ? ` anchored to scenario ${scenario.id}` : ""}.`,
+        content: `Author ONE new MCQ for task statement ${ctx.ts.id} at Bloom level ${bloomLevel}${ctx.scenario ? ` anchored to scenario ${ctx.scenario.id}` : ""}.`,
       },
     ],
-    tools: [
-      {
-        name: emitQuestionTool.name,
-        description: emitQuestionTool.description,
-        input_schema: emitQuestionTool.inputSchema,
-      },
-    ],
-    toolChoice: { type: "tool", name: emitQuestionTool.name },
-    maxTokens: 2048,
-    temperature: 0.4,
+    tools: GENERATOR_TOOL_PARAMS.tools,
+    toolChoice: GENERATOR_TOOL_PARAMS.toolChoice,
+    maxTokens: GENERATOR_TOOL_PARAMS.maxTokens,
+    temperature: GENERATOR_TOOL_PARAMS.temperature,
     db,
   });
 
+  return parseGeneratorMessage(message);
+}
+
+export function parseGeneratorMessage(
+  message: Anthropic.Message,
+): EmitQuestionInput {
   return extractToolInput(
     message,
     emitQuestionTool.name,
@@ -195,7 +278,7 @@ async function callGenerator(
   );
 }
 
-async function callReviewer(
+export async function callReviewer(
   ts: typeof schema.taskStatements.$inferSelect,
   bloomLevel: BloomLevel,
   candidate: EmitQuestionInput,
@@ -249,7 +332,7 @@ async function callReviewer(
   );
 }
 
-function persistApprovedQuestion(
+export function persistApprovedQuestion(
   ts: typeof schema.taskStatements.$inferSelect,
   scenarioId: string | null,
   candidate: EmitQuestionInput,
@@ -288,67 +371,19 @@ export async function generateOneQuestion(
   const db = params.db ?? getAppDb();
   const maxAttempts = params.maxAttempts ?? MAX_GENERATION_ATTEMPTS;
 
-  const ts = db
-    .select()
-    .from(schema.taskStatements)
-    .where(eq(schema.taskStatements.id, params.taskStatementId))
-    .get();
-  if (!ts) {
-    throw new GeneratorError(
-      "not_found",
-      `task statement "${params.taskStatementId}" not found`,
-    );
-  }
-
-  const scenario = params.scenarioId
-    ? (db
-        .select()
-        .from(schema.scenarios)
-        .where(eq(schema.scenarios.id, params.scenarioId))
-        .get() ?? null)
-    : null;
-  if (params.scenarioId && !scenario) {
-    throw new GeneratorError(
-      "not_found",
-      `scenario "${params.scenarioId}" not found`,
-    );
-  }
-
-  const seedQuestions = scenario
-    ? db
-        .select()
-        .from(schema.questions)
-        .where(
-          and(
-            eq(schema.questions.scenarioId, scenario.id),
-            eq(schema.questions.source, "seed"),
-          ),
-        )
-        .all()
-    : db
-        .select()
-        .from(schema.questions)
-        .where(
-          and(
-            eq(schema.questions.taskStatementId, ts.id),
-            eq(schema.questions.source, "seed"),
-          ),
-        )
-        .all();
+  const ctx = loadGeneratorContext(
+    {
+      taskStatementId: params.taskStatementId,
+      scenarioId: params.scenarioId,
+    },
+    db,
+  );
 
   const log: AttemptLogEntry[] = [];
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const candidate = await callGenerator(
-      ts,
-      ts.domainId,
-      params.bloomLevel,
-      scenario,
-      seedQuestions,
-      log,
-      db,
-    );
-    const review = await callReviewer(ts, params.bloomLevel, candidate, db);
+    const candidate = await callGenerator(ctx, params.bloomLevel, log, db);
+    const review = await callReviewer(ctx.ts, params.bloomLevel, candidate, db);
     log.push({
       attempt,
       verdict: review.verdict,
@@ -357,8 +392,8 @@ export async function generateOneQuestion(
     });
     if (review.verdict === "approve") {
       const questionId = persistApprovedQuestion(
-        ts,
-        scenario?.id ?? null,
+        ctx.ts,
+        ctx.scenario?.id ?? null,
         candidate,
         db,
       );
