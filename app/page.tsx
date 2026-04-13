@@ -35,12 +35,20 @@ export default async function Home() {
             <span className="text-green-700 dark:text-green-400">
               API key ({status.apiKeyRedacted}) · {status.defaultModel}
             </span>
-            <Link
-              href="/settings"
-              className="text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-            >
-              Settings
-            </Link>
+            <div className="flex items-baseline gap-4">
+              <Link
+                href="/drill"
+                className="text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+              >
+                Drill
+              </Link>
+              <Link
+                href="/settings"
+                className="text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+              >
+                Settings
+              </Link>
+            </div>
           </div>
           {domains.map((d) => (
             <section key={d.id} className="flex flex-col gap-2">
