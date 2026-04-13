@@ -52,14 +52,14 @@ Source of truth: `spec.md` (280 lines) and `CLAUDE.md`. Every task below traces 
 
 **Goal**: One blessed way to call Claude; API key handled safely; prompt + tool conventions locked in.
 
-- [ ] `/lib/claude/client.ts` — wraps Anthropic SDK, reads API key from `settings` table, handles model selection, supports `prompt_caching` for stable system prompts
-- [ ] `/lib/claude/prompts/` — filesystem-loaded prompt templates with YAML frontmatter (id, version, inputs, outputs) — lint enforced by `.claude/rules/prompts.md`
-- [ ] `/lib/claude/tools/` — base types for tool schemas; **mandatory** error shape `{ isError, errorCategory: 'transient'|'validation'|'business'|'permission', isRetryable, message }` (FR3.5 / AT19 / D2.2)
-- [ ] `/lib/claude/roles/` — per-role wrappers that compose (system prompt + tool set + model). Initial skeletons for `tutor`, `grader`, `generator`, `reviewer`. Each role's tool set is narrow (D2.3)
-- [ ] First-run wizard at `/settings` collects API key + default model; persists to `settings` table; **redacts on response** (FR5.1–5.3, **AT10**)
-- [ ] API key rotation endpoint; no old key ever returned to the browser
-- [ ] Token/cost accounting skeleton: every call logs `{ model, input_tokens, output_tokens, ts }` — used by spend page later
-- [ ] Unit tests: (a) tool-result with malformed shape is rejected; (b) API key never appears in server logs (regex scan of test output)
+- [x] `/lib/claude/client.ts` — wraps Anthropic SDK, reads API key from `settings` table, handles model selection, supports `prompt_caching` for stable system prompts
+- [x] `/lib/claude/prompts/` — filesystem-loaded prompt templates with YAML frontmatter (id, version, inputs, outputs) — lint enforced by `.claude/rules/prompts.md`
+- [x] `/lib/claude/tools/` — base types for tool schemas; **mandatory** error shape `{ isError, errorCategory: 'transient'|'validation'|'business'|'permission', isRetryable, message }` (FR3.5 / AT19 / D2.2)
+- [x] `/lib/claude/roles/` — per-role wrappers that compose (system prompt + tool set + model). Initial skeletons for `tutor`, `grader`, `generator`, `reviewer`. Each role's tool set is narrow (D2.3)
+- [x] First-run wizard at `/settings` collects API key + default model; persists to `settings` table; **redacts on response** (FR5.1–5.3, **AT10**)
+- [x] API key rotation endpoint; no old key ever returned to the browser
+- [x] Token/cost accounting skeleton: every call logs `{ model, input_tokens, output_tokens, cache_*, cost, duration, ts }` — used by spend page later
+- [x] Unit tests: (a) tool-result with malformed shape is rejected; (b) API key never appears in server logs (console spy during set/get cycle)
 
 **Done when**: Can make a hello-world Claude call from a test route. `curl`-ing that route's response body and inspecting the Network tab confirms the key is never exposed. (**AT10**)
 
@@ -276,7 +276,26 @@ Source of truth: `spec.md` (280 lines) and `CLAUDE.md`. Every task below traces 
   - **Bloom classifier** (`lib/curriculum/bloom-classify.ts`): single `emit_bloom_classifications` tool-use call to `claude-sonnet-4-6`; falls back to level-3 heuristic when no `ANTHROPIC_API_KEY` is set, with a one-liner justification that flags the unclassified state. Re-running ingest after the Phase 2 first-run wizard will replace the heuristic with the real classification.
   - **Tests** (vitest, 12 passing): parser extracts all 30 task statement IDs from a synthetic fixture, preserves verbatim bullets, persists 5/30/6/12/4 on first run, running 3× in a row stays at 5/30/6/12/4 (FR1.3 idempotency), hash round-trip, in-memory SQLite exercised via the actual migration SQL.
   - **Blocked acceptance**: AT1 (real ingestion end-to-end) needs `data/exam-guide.pdf` from the user. The `ANTHROPIC_API_KEY` is optional for Phase 1 — heuristic classification is acceptable until the first-run wizard ships in Phase 2.
-- Phase 2 — pending
+- Phase 2 — ✅ complete 2026-04-13
+  - **Secrets at rest** (`lib/settings/crypto.ts`): AES-256-GCM, `v1:{iv}:{tag}:{ct}` base64 payload, 32-byte key auto-generated at `data/.encryption-key` (0600). Key path overridable via `CCA_ENCRYPTION_KEY_PATH` for tests. Tampered ciphertext rejected by the GCM auth tag.
+  - **Settings accessors** (`lib/settings/index.ts`): singleton row (id=1), lazily created. `setApiKey` / `getApiKey` / `clearApiKey` / `rotateApiKey`-by-re-`setApiKey`. `getApiKey` precedence: DB → `ANTHROPIC_API_KEY` env fallback (preserves Phase 1 ingest flow). `getSettingsStatus` returns a browser-safe shape (redacted form `sk-ant…abcd`, never raw).
+  - **Claude client** (`lib/claude/client.ts`): caches one `Anthropic` instance per key value; auto-invalidates on rotation. `callClaude({role, model?, system, messages, tools, cacheSystem?, ...})` wraps `messages.create`. `cacheSystem:true` stamps `cache_control: {type:"ephemeral"}` on the last system block (NFR4.3). On success, calls `recordCall` to append a row to `claude_call_log` with tokens + cost + stop_reason + duration. Logging failures are swallowed so they can't bubble up and blow away a successful response. `NoApiKeyError` is a distinct class routed to `/settings` by the UI.
+  - **Token logging** (`lib/claude/tokens.ts`): pricing table (sonnet-4-6 $3/$15, opus-4-6 $15/$75, haiku-4-5 $1/$5); cache writes 1.25×, reads 0.1×. Unknown models log at $0 instead of crashing.
+  - **Tool contracts** (`lib/claude/tools/types.ts`): `ToolDefinition` + mandatory structured error shape `{isError, errorCategory, isRetryable, message}` (D2.2 / FR3.5 / AT19). Zod validator `toolErrorSchema`, helpers `toolError()` + `isToolError()` + `serializeToolResult()`.
+  - **Prompt loader** (`lib/claude/prompts/loader.ts`): filesystem walker of `/prompts/**/*.md` with minimal YAML-ish frontmatter parse (no external YAML dep), `{{var}}` substitution, duplicate-id detection. `prompts/hello.md` seeded as a placeholder.
+  - **Role skeletons** (`lib/claude/roles/`): `tutor`, `grader`, `generator`, `reviewer` with narrow tool sets (D2.3). Tool handlers wired per-phase (generator Phase 6, tutor Phase 9, grader Phase 10).
+  - **Migrations**: added `claude_call_log` table via `drizzle/0001_curvy_chamber.sql`. `getAppDb()` in `lib/db/index.ts` runs migrations once per process for API routes.
+  - **Settings UI** (`app/settings/`): server component reads redacted status; `SettingsForm` is a client component that POSTs to `/api/settings`. Root page (`app/page.tsx`) gates on `apiKeyConfigured` and links to `/settings` on first run.
+  - **API routes** (`app/api/settings/route.ts`, `app/api/claude/hello/route.ts`): `GET /api/settings` redacted status, `POST /api/settings` accepts `{apiKey?, defaultModel?, clearApiKey?}`, validates with Zod, never echoes raw key. `GET /api/claude/hello` = AT10 smoke: calls Claude end-to-end, returns `{ok, model, tokens, text}` — no key anywhere.
+  - **Tests**: 46 total, all green. Added `settings-crypto.test.ts` (round-trip, 0600 perms, tamper detection), `settings-accessors.test.ts` (encrypted-at-rest assertion, env fallback, precedence, redaction, console-spy no-leak), `tool-errors.test.ts` (every error category, malformed rejected), `prompt-loader.test.ts` (frontmatter parse, placeholder substitution, duplicate-id, missing-file graceful), `claude-tokens.test.ts` (sonnet pricing, cache-price multipliers, call_log insert).
+  - **AT10 verified** live against the running dev server:
+    - `POST /api/settings` with a 64-char test key → response returns only redacted form (`sk-ant…ghij`).
+    - `GET /api/settings` → no trace of raw key.
+    - Rotation: second key submitted; neither old nor new key present in any response body.
+    - DB inspection via better-sqlite3: `settings.api_key_encrypted` starts with `v1:` and does not contain either plaintext.
+    - Dev-server stdout scanned: `grep -c` on raw key literals = 0.
+    - `/api/claude/hello` with a deliberately invalid key returned the upstream 401 as-is (Anthropic's `invalid x-api-key` message); our code did not leak the submitted key into the error body or server log.
+  - **Intentionally deferred**: real Claude round-trip via `/api/claude/hello` with a valid key (user to submit via `/settings`); streaming path for tutor (Phase 9, per OD5); Batches API wiring (Phase 6, per D4.5); `.env.local` and `~/.bashrc` remain ingest-only — the UI is the path of record going forward.
 - Phase 3 — pending
 - Phase 4 — pending
 - Phase 5 — pending

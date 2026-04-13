@@ -37,4 +37,19 @@ export function runMigrations(db: Db = getDb()): void {
   migrate(db, { migrationsFolder: resolve(process.cwd(), "drizzle") });
 }
 
+let _migrated = false;
+
+/**
+ * Returns a migrated handle. Use this from API routes / scripts that need
+ * the schema up to date. Idempotent: migrations only run once per process.
+ */
+export function getAppDb(): Db {
+  const db = getDb();
+  if (!_migrated) {
+    runMigrations(db);
+    _migrated = true;
+  }
+  return db;
+}
+
 export { schema };

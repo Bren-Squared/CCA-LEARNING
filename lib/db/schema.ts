@@ -224,6 +224,28 @@ export const tutorSessions = sqliteTable("tutor_sessions", {
 });
 
 // ---------------------------------------------------------------------------
+// Claude API call log (token usage + cost; feeds the Phase 13 spend page)
+// ---------------------------------------------------------------------------
+
+export const claudeCallLog = sqliteTable("claude_call_log", {
+  id: text("id").primaryKey(),
+  ts: integer("ts", { mode: "timestamp_ms" })
+    .notNull()
+    .default(sql`(unixepoch('subsec') * 1000)`),
+  role: text("role").notNull(),
+  model: text("model").notNull(),
+  inputTokens: integer("input_tokens").notNull().default(0),
+  outputTokens: integer("output_tokens").notNull().default(0),
+  cacheCreationInputTokens: integer("cache_creation_input_tokens")
+    .notNull()
+    .default(0),
+  cacheReadInputTokens: integer("cache_read_input_tokens").notNull().default(0),
+  estimatedCostUsd: real("estimated_cost_usd").notNull().default(0),
+  stopReason: text("stop_reason"),
+  durationMs: integer("duration_ms").notNull().default(0),
+});
+
+// ---------------------------------------------------------------------------
 // Settings (single-row singleton; FR5)
 // ---------------------------------------------------------------------------
 
@@ -274,3 +296,5 @@ export type TutorSession = typeof tutorSessions.$inferSelect;
 export type NewTutorSession = typeof tutorSessions.$inferInsert;
 export type Settings = typeof settings.$inferSelect;
 export type NewSettings = typeof settings.$inferInsert;
+export type ClaudeCallLog = typeof claudeCallLog.$inferSelect;
+export type NewClaudeCallLog = typeof claudeCallLog.$inferInsert;

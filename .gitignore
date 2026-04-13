@@ -46,6 +46,10 @@ next-env.d.ts
 /data/*.sqlite-*
 /data/exam-guide.pdf
 /data/exam-guide.txt
+/data/.encryption-key
+
+# Claude Code scheduled tasks lockfile (runtime artifact)
+/.claude/scheduled_tasks.lock
 
 # unrelated personal workspace — lives inside this dir but not part of the project
 /Claude-Cowork/
