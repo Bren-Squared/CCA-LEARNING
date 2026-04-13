@@ -15,6 +15,13 @@
       "when": 1776103711792,
       "tag": "0001_curvy_chamber",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776104973292,
+      "tag": "0002_huge_changeling",
+      "breakpoints": true
     }
   ]
 }

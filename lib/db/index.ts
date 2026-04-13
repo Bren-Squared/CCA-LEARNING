@@ -7,6 +7,13 @@ import * as schema from "./schema";
 
 export type Db = ReturnType<typeof drizzle<typeof schema>>;
 
+/**
+ * A Db handle OR a transaction scope inside `db.transaction(tx => …)`.
+ * Use this when a function may be called either at top level or nested
+ * inside an outer transaction.
+ */
+export type DbClient = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
+
 let _db: Db | null = null;
 let _sqlite: Database.Database | null = null;
 

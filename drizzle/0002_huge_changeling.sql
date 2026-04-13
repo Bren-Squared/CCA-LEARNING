@@ -1,0 +1,1 @@
+CREATE INDEX `progress_events_ts_idx` ON `progress_events` (`task_statement_id`,`bloom_level`,`ts`);

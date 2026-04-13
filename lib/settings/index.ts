@@ -90,6 +90,28 @@ export function getCheapModel(db: Db = getDb()): string {
   return readSettings(db).cheapModel;
 }
 
+export function setReviewHalfLifeDays(days: number, db: Db = getDb()): void {
+  if (!Number.isFinite(days) || days < 1 || days > 120) {
+    throw new Error("review_half_life_days must be between 1 and 120");
+  }
+  ensureRow(db);
+  db.update(schema.settings)
+    .set({ reviewHalfLifeDays: days })
+    .where(eq(schema.settings.id, SINGLETON_ID))
+    .run();
+}
+
+export function setBulkCostCeilingUsd(usd: number, db: Db = getDb()): void {
+  if (!Number.isFinite(usd) || usd < 0 || usd > 50) {
+    throw new Error("bulk_cost_ceiling_usd must be between 0 and 50");
+  }
+  ensureRow(db);
+  db.update(schema.settings)
+    .set({ bulkCostCeilingUsd: usd })
+    .where(eq(schema.settings.id, SINGLETON_ID))
+    .run();
+}
+
 /**
  * Status shape safe to send to the browser. Never includes the key itself.
  */

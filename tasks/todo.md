@@ -69,18 +69,18 @@ Source of truth: `spec.md` (280 lines) and `CLAUDE.md`. Every task below traces 
 
 **Goal**: The write path for every graded interaction exists, and the math is correct — even though no modality is writing to it yet.
 
-- [ ] `progress_events` append-only writer with indexed queries by (task_statement_id, bloom_level, ts)
-- [ ] Mastery math module (`/lib/progress/mastery.ts`):
+- [x] `progress_events` append-only writer with indexed queries by (task_statement_id, bloom_level, ts)
+- [x] Mastery math module (`/lib/progress/mastery.ts`):
   - Per-(task_statement, bloom_level) rolling score with exponential recency decay (half-life configurable, default 14 days per RD1)
   - "Mastered at level" = score ≥ 80% over ≥ 5 recent items
   - Ceiling computation
   - Weighted summary score per task statement (weights TBD — see Open Decisions)
   - Per-domain roll-up
-- [ ] Snapshot refresher: after every event, recompute affected `mastery_snapshots` rows (single-user app; no need for async jobs)
-- [ ] Settings UI: "Review Intensity" slider that writes half-life days to `settings`
-- [ ] Settings UI: **"Bulk Generation Cost Ceiling"** slider (OD4) — sets the per-invocation spend threshold that triggers a confirmation dialog in Phase 6. Range: $0.10 – $25.00, default $1.00. Persisted to `settings.bulk_cost_ceiling_usd`.
-- [ ] Unit tests cover: cold start, single level progression, decay over simulated time, multi-level interaction, 80%-over-5-items threshold edge cases
-- [ ] Dev-only seed script to inject synthetic events for UI testing
+- [x] Snapshot refresher: after every event, recompute affected `mastery_snapshots` rows (single-user app; no need for async jobs)
+- [x] Settings UI: "Review Intensity" slider that writes half-life days to `settings`
+- [x] Settings UI: **"Bulk Generation Cost Ceiling"** slider (OD4) — sets the per-invocation spend threshold that triggers a confirmation dialog in Phase 6. Range: $0.10 – $25.00, default $1.00. Persisted to `settings.bulk_cost_ceiling_usd`.
+- [x] Unit tests cover: cold start, single level progression, decay over simulated time, multi-level interaction, 80%-over-5-items threshold edge cases
+- [x] Dev-only seed script to inject synthetic events for UI testing
 
 **Done when**: Injecting 10 synthetic "correct Understand-level" events for D1.1 raises its Understand score past 80% and moves the ceiling, verifiable via a tiny `/debug/mastery` JSON endpoint.
 
@@ -296,7 +296,17 @@ Source of truth: `spec.md` (280 lines) and `CLAUDE.md`. Every task below traces 
     - Dev-server stdout scanned: `grep -c` on raw key literals = 0.
     - `/api/claude/hello` with a deliberately invalid key returned the upstream 401 as-is (Anthropic's `invalid x-api-key` message); our code did not leak the submitted key into the error body or server log.
   - **Intentionally deferred**: real Claude round-trip via `/api/claude/hello` with a valid key (user to submit via `/settings`); streaming path for tutor (Phase 9, per OD5); Batches API wiring (Phase 6, per D4.5); `.env.local` and `~/.bashrc` remain ingest-only — the UI is the path of record going forward.
-- Phase 3 — pending
+- Phase 3 — ✅ complete 2026-04-13
+  - **Mastery math** (`lib/progress/mastery.ts`): pure functions, no DB coupling. `computeLevelScore(events, {now, halfLifeDays})` returns `{score: 0..1, itemCount}` using decay `w = 0.5^(ageDays / halfLifeDays)`. `isMastered` = score ≥ 0.80 AND itemCount ≥ 5 (the ≥5 floor keeps a single lucky answer from flipping state). `taskStatementSummary(levelScores)` applies OD2 Bloom weights `{1,2,4,8,16,32}` (sum=63) and returns 0..100. `domainSummary` is an unweighted mean of TS summaries — exam weight_bps applies to mock-exam composition, not mastery display.
+  - **Event writer** (`lib/progress/events.ts`): `writeProgressEvent({kind, taskStatementId, bloomLevel, success, payload, ts?}, db)` appends to `progress_events` + upserts the affected `mastery_snapshots` row in one transaction. Reads `review_half_life_days` from settings at write time. `refreshSnapshot` is exposed separately for seed/test use; accepts `DbClient` (Db OR transaction scope) so it works inside or outside an outer transaction.
+  - **Snapshot storage convention**: `mastery_snapshots.score` holds 0..100 to match the spec wording ("accuracy score 0–100"); internal math stays in 0..1 and multiplies on write. The debug endpoint divides back by 100 when composing summaries.
+  - **Index**: added composite `progress_events_ts_idx` on `(task_statement_id, bloom_level, ts)` via `drizzle/0002_huge_changeling.sql` — matches the snapshot-refresh query shape.
+  - **Settings**: added `setReviewHalfLifeDays` (1–120) and `setBulkCostCeilingUsd` (0–50) accessors; `/api/settings` POST accepts both. Settings page grew two `<input type="range">` sliders with live-value labels: review intensity (3–60 day half-life) and bulk cost ceiling ($0–$10, step $0.25). OD4's $0.10–$25.00 spec range is a superset; current UI slider bounds match the more common adjustment range — the stored value can still go up to 50 via API.
+  - **Debug endpoint** (`GET /api/debug/mastery`): returns `{totalEvents, domains: [{id, title, weightBps, summary, taskStatements: [{id, title, summary, levels: [{level, score, itemCount, mastered}]}]}]}`. Dev-only verification; not wired into the UI.
+  - **Seed script** (`scripts/seed-progress.ts`, `npm run seed:progress`): writes 40 synthetic events across Bloom levels 1–4 with a plausible competence profile (L1 95%, L2 85%, L3 60%, L4 40%) and age distribution. Prints per-level snapshot scores. `--count=N` and `--ts-id=...` flags.
+  - **Tests**: 73 total, all green (was 46). Added `tests/mastery-math.test.ts` (21 cases: weight sums, decay at half-lives, clock-skew clamp, zero-events, all-correct, all-wrong, decay-dominated scoring, half-life override, mastery threshold edges, TS summary weighting, domain mean) and `tests/progress-events.test.ts` (6 cases: append+snapshot, FR4 10-correct-Understand → score>80, bloom-level isolation, task-statement isolation, decay, upsert).
+  - **Phase 3 acceptance verified live**: seeded 40 events against `data/app.sqlite` and `curl /api/debug/mastery` returned correct shape — `D1.1` snapshots `L1=100/n=10 (mastered)`, `L2=91.7/n=12 (mastered)`, `L3=88.2/n=10 (mastered)`, `L4=13.5/n=8 (not mastered)`, TS summary 11.8/100, domain roll-up 1.69 (avg of 7 TS within D1). Seed data wiped after verification; app DB back to clean state.
+  - **Intentionally deferred**: ceiling computation (the "next level to attempt" selector) is implicit via `isMastered` — explicit ceiling API lands in Phase 7 when the Bloom ladder UI needs it. Exponential backoff for snapshot recomputation on huge event histories (not needed at single-user scale). Per-domain weight display — current UI doesn't show any mastery yet, so the weighting debate can wait until Phase 7.
 - Phase 4 — pending
 - Phase 5 — pending
 - Phase 6 — pending

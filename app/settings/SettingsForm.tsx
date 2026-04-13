@@ -18,6 +18,8 @@ export default function SettingsForm({ initial }: { initial: Status }) {
   const [status, setStatus] = useState<Status>(initial);
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(initial.defaultModel);
+  const [halfLife, setHalfLife] = useState(initial.reviewHalfLifeDays);
+  const [ceiling, setCeiling] = useState(initial.bulkCostCeilingUsd);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{
     kind: "ok" | "err";
@@ -26,7 +28,9 @@ export default function SettingsForm({ initial }: { initial: Status }) {
 
   useEffect(() => {
     setModel(status.defaultModel);
-  }, [status.defaultModel]);
+    setHalfLife(status.reviewHalfLifeDays);
+    setCeiling(status.bulkCostCeilingUsd);
+  }, [status.defaultModel, status.reviewHalfLifeDays, status.bulkCostCeilingUsd]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,6 +40,10 @@ export default function SettingsForm({ initial }: { initial: Status }) {
       const body: Record<string, unknown> = {};
       if (apiKey.length > 0) body.apiKey = apiKey;
       if (model !== status.defaultModel) body.defaultModel = model;
+      if (halfLife !== status.reviewHalfLifeDays)
+        body.reviewHalfLifeDays = halfLife;
+      if (ceiling !== status.bulkCostCeilingUsd)
+        body.bulkCostCeilingUsd = ceiling;
       if (Object.keys(body).length === 0) {
         setMessage({ kind: "err", text: "Nothing changed." });
         setPending(false);
@@ -114,6 +122,52 @@ export default function SettingsForm({ initial }: { initial: Status }) {
         </select>
         <p className="text-xs text-zinc-600 dark:text-zinc-400">
           Cheap model (reviewer + bulk): {status.cheapModel}
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <label className="text-sm font-medium" htmlFor="half-life">
+          Review intensity{" "}
+          <span className="font-mono text-xs text-zinc-500">
+            ({halfLife.toFixed(0)}-day half-life)
+          </span>
+        </label>
+        <input
+          id="half-life"
+          type="range"
+          min={3}
+          max={60}
+          step={1}
+          value={halfLife}
+          onChange={(e) => setHalfLife(Number(e.target.value))}
+          className="accent-zinc-900 dark:accent-zinc-100"
+        />
+        <p className="text-xs text-zinc-600 dark:text-zinc-400">
+          Shorter = recent answers weigh more; you re-review topics more often.
+          Longer = older wins stay on the books longer.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <label className="text-sm font-medium" htmlFor="ceiling">
+          Bulk cost ceiling{" "}
+          <span className="font-mono text-xs text-zinc-500">
+            (${ceiling.toFixed(2)} / batch)
+          </span>
+        </label>
+        <input
+          id="ceiling"
+          type="range"
+          min={0}
+          max={10}
+          step={0.25}
+          value={ceiling}
+          onChange={(e) => setCeiling(Number(e.target.value))}
+          className="accent-zinc-900 dark:accent-zinc-100"
+        />
+        <p className="text-xs text-zinc-600 dark:text-zinc-400">
+          Question generation and other bulk jobs will pause for confirmation
+          if the projected cost exceeds this ceiling.
         </p>
       </div>
 

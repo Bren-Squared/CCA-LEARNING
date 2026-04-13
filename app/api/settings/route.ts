@@ -4,7 +4,9 @@ import {
   clearApiKey,
   getSettingsStatus,
   setApiKey,
+  setBulkCostCeilingUsd,
   setDefaultModel,
+  setReviewHalfLifeDays,
 } from "@/lib/settings";
 
 export const runtime = "nodejs";
@@ -19,13 +21,17 @@ const postSchema = z
     apiKey: z.string().min(20).optional(),
     defaultModel: z.string().min(1).optional(),
     clearApiKey: z.boolean().optional(),
+    reviewHalfLifeDays: z.number().min(1).max(120).optional(),
+    bulkCostCeilingUsd: z.number().min(0).max(50).optional(),
   })
   .refine(
     (v) =>
       v.apiKey !== undefined ||
       v.defaultModel !== undefined ||
-      v.clearApiKey === true,
-    { message: "at least one of apiKey / defaultModel / clearApiKey required" },
+      v.clearApiKey === true ||
+      v.reviewHalfLifeDays !== undefined ||
+      v.bulkCostCeilingUsd !== undefined,
+    { message: "at least one field required" },
   );
 
 export async function POST(req: Request) {
@@ -50,6 +56,10 @@ export async function POST(req: Request) {
     if (parsed.data.clearApiKey) clearApiKey(db);
     if (parsed.data.apiKey) setApiKey(parsed.data.apiKey, db);
     if (parsed.data.defaultModel) setDefaultModel(parsed.data.defaultModel, db);
+    if (parsed.data.reviewHalfLifeDays !== undefined)
+      setReviewHalfLifeDays(parsed.data.reviewHalfLifeDays, db);
+    if (parsed.data.bulkCostCeilingUsd !== undefined)
+      setBulkCostCeilingUsd(parsed.data.bulkCostCeilingUsd, db);
   } catch (err) {
     return Response.json(
       { error: err instanceof Error ? err.message : "unknown error" },

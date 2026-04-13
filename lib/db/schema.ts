@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  index,
   integer,
   primaryKey,
   real,
@@ -130,30 +131,36 @@ export const preparationSteps = sqliteTable(
 // Progress (append-only events + derived snapshots; FR4)
 // ---------------------------------------------------------------------------
 
-export const progressEvents = sqliteTable("progress_events", {
-  id: text("id").primaryKey(),
-  ts: integer("ts", { mode: "timestamp_ms" })
-    .notNull()
-    .default(sql`(unixepoch('subsec') * 1000)`),
-  kind: text("kind", {
-    enum: [
-      "mcq_answer",
-      "flashcard_grade",
-      "scenario_grade",
-      "tutor_signal",
-      "exercise_step_grade",
-      "explainer_check",
-    ],
-  }).notNull(),
-  taskStatementId: text("task_statement_id")
-    .notNull()
-    .references(() => taskStatements.id, { onDelete: "cascade" }),
-  bloomLevel: integer("bloom_level").notNull(),
-  success: integer("success", { mode: "boolean" }).notNull(),
-  payload: text("payload", { mode: "json" })
-    .$type<Record<string, unknown>>()
-    .notNull(),
-});
+export const progressEvents = sqliteTable(
+  "progress_events",
+  {
+    id: text("id").primaryKey(),
+    ts: integer("ts", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch('subsec') * 1000)`),
+    kind: text("kind", {
+      enum: [
+        "mcq_answer",
+        "flashcard_grade",
+        "scenario_grade",
+        "tutor_signal",
+        "exercise_step_grade",
+        "explainer_check",
+      ],
+    }).notNull(),
+    taskStatementId: text("task_statement_id")
+      .notNull()
+      .references(() => taskStatements.id, { onDelete: "cascade" }),
+    bloomLevel: integer("bloom_level").notNull(),
+    success: integer("success", { mode: "boolean" }).notNull(),
+    payload: text("payload", { mode: "json" })
+      .$type<Record<string, unknown>>()
+      .notNull(),
+  },
+  (t) => [
+    index("progress_events_ts_idx").on(t.taskStatementId, t.bloomLevel, t.ts),
+  ],
+);
 
 export const masterySnapshots = sqliteTable(
   "mastery_snapshots",
