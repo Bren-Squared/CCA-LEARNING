@@ -31,18 +31,18 @@ Source of truth: `spec.md` (280 lines) and `CLAUDE.md`. Every task below traces 
 
 **Goal**: The exam guide PDF becomes structured, queryable data. No UI yet.
 
-- [ ] Define Drizzle schema for: `domains`, `task_statements`, `scenarios`, `scenario_domain_map`, `questions`, `flashcards`, `preparation_exercises`, `preparation_steps`, `progress_events`, `mastery_snapshots`, `mock_attempts`, `tutor_sessions`, `settings` (matches spec Data Model section, +a few explicit join tables)
-- [ ] Generate initial migration; commit the `.sql` file
-- [ ] TypeScript types mirror schema (via Drizzle inference)
-- [ ] Place the CCA Foundations Exam Guide PDF at `/data/exam-guide.pdf` (gitignored — add instructions in README for where to obtain it)
-- [ ] Write `scripts/ingest.ts`:
-  - Parse PDF with `unpdf`
+- [x] Define Drizzle schema for: `domains`, `task_statements`, `scenarios`, `scenario_domain_map`, `questions`, `flashcards`, `preparation_exercises`, `preparation_steps`, `preparation_attempts`, `progress_events`, `mastery_snapshots`, `mock_attempts`, `tutor_sessions`, `settings` (14 tables)
+- [x] Generate initial migration; commit the `.sql` file (`drizzle/0000_flashy_dexter_bennett.sql`)
+- [x] TypeScript types mirror schema (via Drizzle inference in `lib/db/schema.ts`)
+- [ ] Place the CCA Foundations Exam Guide PDF at `/data/exam-guide.pdf` (**blocked on user** — README documents source)
+- [x] Write `scripts/ingest.ts`:
+  - Parse PDF with `unpdf` (extractText + getDocumentProxy path)
   - Extract 5 domains + weights, 30 task statements (verbatim Knowledge/Skills bullets), 6 scenarios with domain mappings, 12 sample questions with explanations, 4 preparation exercises with domains-reinforced
-  - One-shot Claude pass to classify each seed question's Bloom level (1–6) with justification (FR3.1)
-  - Idempotent upsert (FR1.3): re-running replaces, never duplicates
-- [ ] `npm run ingest` exits 0 and reports `5 domains, 30 task statements, 6 scenarios, 12 questions, 4 exercises` (**AT1**)
-- [ ] Re-running `npm run ingest` logs "no changes" when PDF unchanged
-- [ ] Unit test: parser extracts all 30 task statement IDs correctly (D1.1 through D5.6)
+  - One-shot Claude pass to classify each seed question's Bloom level (1–6) with justification (FR3.1) — falls back to heuristic when `ANTHROPIC_API_KEY` is absent so the re-run after Phase 2 first-run wizard refreshes classifications
+  - Idempotent upsert (FR1.3): PDF-hash short-circuit + onConflictDoUpdate by primary key; re-running is a no-op
+- [ ] `npm run ingest` exits 0 and reports `5 domains, 30 task statements, 6 scenarios, 12 questions, 4 exercises` (**AT1**) — **blocked on PDF**
+- [ ] Re-running `npm run ingest` logs "no changes" when PDF unchanged — **blocked on PDF** (logic verified via unit test)
+- [x] Unit test: parser extracts all 30 task statement IDs correctly (D1.1 through D5.6)
 
 **Done when**: AT1 passes. `data/app.sqlite` contains the full curriculum, explorable via `drizzle-kit studio`.
 
@@ -269,7 +269,13 @@ Source of truth: `spec.md` (280 lines) and `CLAUDE.md`. Every task below traces 
     - `npm test` → Vitest 4.1.4, 1 file / 2 tests passing (arithmetic + Node ≥ 22 assertion).
   - **`.claude/` dogfooding in place** (D3.1/D3.2/D3.3): `skills/grade-scenario.md`, `skills/generate-question.md`, `commands/ingest.md`, `rules/prompts.md`, `rules/tools.md` all stubbed with the frontmatter the spec calls for. Bodies fill in Phases 6 & 10.
   - **Not done in Phase 0 (intentionally deferred)**: git init (no phase item mandates it — create-next-app skipped it because the dir wasn't empty). Will init at the start of Phase 1 so ingest work lands on a clean first commit.
-- Phase 1 — pending
+- Phase 1 — ⚠️ complete except for real-PDF ingestion (blocked on user supplying `data/exam-guide.pdf`)
+  - **Schema**: 14 tables across curriculum/progress/settings (`lib/db/schema.ts`). FK enforcement verified. Initial migration at `drizzle/0000_flashy_dexter_bennett.sql`.
+  - **Parser** (`lib/curriculum/parser.ts`): regex + state-machine extraction of domains, task statements (Knowledge/Skills bullets verbatim), scenarios, sample questions, preparation exercises. Zod schemas in `lib/curriculum/types.ts` gate the output.
+  - **Ingest orchestrator** (`scripts/ingest.ts`): SHA-256-of-PDF idempotency short-circuit, graceful missing-PDF exit with instructions, summary line matches AT1 wording, coverage assertion after upsert.
+  - **Bloom classifier** (`lib/curriculum/bloom-classify.ts`): single `emit_bloom_classifications` tool-use call to `claude-sonnet-4-6`; falls back to level-3 heuristic when no `ANTHROPIC_API_KEY` is set, with a one-liner justification that flags the unclassified state. Re-running ingest after the Phase 2 first-run wizard will replace the heuristic with the real classification.
+  - **Tests** (vitest, 12 passing): parser extracts all 30 task statement IDs from a synthetic fixture, preserves verbatim bullets, persists 5/30/6/12/4 on first run, running 3× in a row stays at 5/30/6/12/4 (FR1.3 idempotency), hash round-trip, in-memory SQLite exercised via the actual migration SQL.
+  - **Blocked acceptance**: AT1 (real ingestion end-to-end) needs `data/exam-guide.pdf` from the user. The `ANTHROPIC_API_KEY` is optional for Phase 1 — heuristic classification is acceptable until the first-run wizard ships in Phase 2.
 - Phase 2 — pending
 - Phase 3 — pending
 - Phase 4 — pending
