@@ -1,8 +1,20 @@
 #!/usr/bin/env tsx
+import "../lib/polyfills";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+
+for (const envFile of [".env.local", ".env"]) {
+  const p = resolve(process.cwd(), envFile);
+  if (existsSync(p)) {
+    try {
+      process.loadEnvFile(p);
+    } catch {
+      // ignore malformed env files — surfacing later via the API key check
+    }
+  }
+}
 import { extractText, getDocumentProxy } from "unpdf";
 import { classifySeedQuestionsBloom } from "../lib/curriculum/bloom-classify";
 import {
@@ -12,7 +24,7 @@ import {
   writeIngestHash,
 } from "../lib/curriculum/ingest";
 import { parseCurriculumText } from "../lib/curriculum/parser";
-import { closeDb, getDb } from "../lib/db";
+import { closeDb, getDb, runMigrations } from "../lib/db";
 import {
   EXPECTED_DOMAINS,
   EXPECTED_EXERCISE_COUNT,
@@ -83,11 +95,14 @@ async function main(): Promise<number> {
   const pdfBytes = await readFile(PDF_PATH);
   const hash = createHash("sha256").update(pdfBytes).digest("hex");
   const db = getDb();
+  runMigrations(db);
 
+  const force = process.argv.includes("--force");
   const priorHash = readIngestHash(db);
-  if (priorHash === hash) {
+  if (priorHash === hash && !force) {
     console.log("no changes — PDF hash matches prior ingest");
     console.log(`   sha256: ${hash.slice(0, 16)}…`);
+    console.log("   (pass --force to re-parse and re-classify anyway)");
     printSummary(countIngested(db));
     return 0;
   }

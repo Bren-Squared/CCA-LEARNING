@@ -1,6 +1,6 @@
 import { EXPECTED_TASK_STATEMENT_IDS } from "../../lib/curriculum/expected";
 
-const DOMAIN_HEADERS: Record<string, { title: string; pct: number }> = {
+const DOMAIN_TITLES: Record<string, { title: string; pct: number }> = {
   D1: { title: "Agentic Architecture & Orchestration", pct: 27 },
   D2: { title: "Tool Design & MCP Integration", pct: 18 },
   D3: { title: "Claude Code Configuration & Workflows", pct: 20 },
@@ -24,76 +24,55 @@ const EXERCISE_TITLES = [
   "Design and Debug a Multi-Agent Research Pipeline",
 ];
 
-function tsBlock(id: string): string {
-  return [
-    `${id} Task statement title for ${id}`,
-    "Knowledge of:",
-    `• The agentic loop control flow relevant to ${id}`,
-    `• Key failure modes associated with ${id}`,
-    "Skills in:",
-    `• Diagnosing issues attributable to ${id}`,
-    `• Designing the control surface for ${id}`,
-    "",
-  ].join("\n");
+function tsSegment(id: string): string {
+  return (
+    `Task Statement ${id.slice(1)}: Example title for ${id} ` +
+    `Knowledge of: - The agentic loop control flow relevant to ${id} - Key failure modes associated with ${id} - A third knowledge bullet for ${id} ` +
+    `Skills in: - Diagnosing issues attributable to ${id} - Designing the control surface for ${id} - Articulating tradeoffs for ${id}`
+  );
 }
 
 export function buildSyntheticGuide(): string {
   const parts: string[] = [
-    "Claude Certified Architect — Foundations Exam Guide",
-    "Version 0.1 — Feb 10 2025",
-    "",
+    "Claude Certified Architect – Foundations Certification Exam Guide",
+    "The exam has the following content domains and weightings:",
   ];
 
-  for (const [id, { title, pct }] of Object.entries(DOMAIN_HEADERS)) {
-    parts.push(`Domain ${id.slice(1)}: ${title} (${pct}%)`);
-    parts.push(
-      "This domain covers the concepts outlined in the task statements below.",
-    );
-    parts.push("");
-    for (const ts of EXPECTED_TASK_STATEMENT_IDS.filter(
-      (x) => x.startsWith(`${id}.`),
-    )) {
-      parts.push(tsBlock(ts));
-    }
+  for (const [id, { title, pct }] of Object.entries(DOMAIN_TITLES)) {
+    parts.push(`- Domain ${id.slice(1)}: ${title} (${pct}% of scored content)`);
   }
 
-  parts.push("");
-  parts.push("Scenarios");
-  parts.push("");
+  parts.push("Exam Scenarios");
   SCENARIO_TITLES.forEach((title, i) => {
-    const domains = [`D${(i % 5) + 1}`];
-    parts.push(`Scenario ${i + 1}: ${title}`);
-    parts.push(`Description for ${title}.`);
-    parts.push(`Primary domains: ${domains.join(", ")}`);
-    parts.push("");
+    const picks = [DOMAIN_TITLES[`D${(i % 5) + 1}`].title];
+    parts.push(
+      `Scenario ${i + 1}: ${title}. Description paragraph for ${title}. Primary domains: ${picks.join(", ")}`,
+    );
   });
 
+  for (const ts of EXPECTED_TASK_STATEMENT_IDS) {
+    parts.push(tsSegment(ts));
+  }
+
   parts.push("Sample Questions");
-  parts.push("");
+  parts.push(
+    "The following sample questions illustrate the format and difficulty level of the exam.",
+  );
   for (let q = 1; q <= 12; q++) {
-    const ts = EXPECTED_TASK_STATEMENT_IDS[q % EXPECTED_TASK_STATEMENT_IDS.length];
-    parts.push(`Sample Question ${q}. Example stem for question ${q}.`);
-    parts.push("A) First candidate answer");
-    parts.push("B) Second candidate answer");
-    parts.push("C) Third candidate answer");
-    parts.push("D) Fourth candidate answer");
-    parts.push("Answer: A");
-    parts.push(`Task Statement: ${ts}`);
-    parts.push("Explanation follows with justification prose.");
-    parts.push("");
+    const scenarioTitle = SCENARIO_TITLES[(q - 1) % SCENARIO_TITLES.length];
+    if ((q - 1) % 2 === 0) parts.push(`Scenario: ${scenarioTitle}`);
+    parts.push(
+      `Question ${q}: Example stem for question ${q}. A) First candidate. B) Second candidate. C) Third candidate. D) Fourth candidate. Correct Answer: A Explanation for question ${q} with reasoning.`,
+    );
   }
 
   parts.push("Preparation Exercises");
-  parts.push("");
   EXERCISE_TITLES.forEach((title, i) => {
-    parts.push(`Exercise ${i + 1}: ${title}`);
-    parts.push(`Overview paragraph for ${title}.`);
-    parts.push(`Domains reinforced: D${(i % 5) + 1}`);
-    parts.push("Step 1. Read the scenario and identify the goal.");
-    parts.push("Step 2. Produce an artifact satisfying the rubric.");
-    parts.push("Step 3. Review the independent critique.");
-    parts.push("");
+    const reinforced = DOMAIN_TITLES[`D${(i % 5) + 1}`].title;
+    parts.push(
+      `Exercise ${i + 1}: ${title} Objective: Practice the core behavior for ${title}. Steps: 1. Read the scenario and identify the goal. 2. Produce an artifact satisfying the rubric. 3. Review the independent critique. Domains reinforced: ${reinforced}`,
+    );
   });
 
-  return parts.join("\n");
+  return parts.join(" ");
 }

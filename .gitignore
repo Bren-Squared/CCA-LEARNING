@@ -45,6 +45,7 @@ next-env.d.ts
 /data/*.sqlite
 /data/*.sqlite-*
 /data/exam-guide.pdf
+/data/exam-guide.txt
 
 # unrelated personal workspace — lives inside this dir but not part of the project
 /Claude-Cowork/
