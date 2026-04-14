@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { getAppDb, schema } from "@/lib/db";
+import { type BloomLevel, BLOOM_LEVELS } from "@/lib/progress/mastery";
 import { buildDrillPool, type DrillScope } from "@/lib/study/drill";
 import DrillSession from "./DrillSession";
 
@@ -13,6 +14,15 @@ function parseScope(params: URLSearchParams): DrillScope {
   if (type === "task" && id) return { type: "task", id };
   if (type === "scenario" && id) return { type: "scenario", id };
   return { type: "all" };
+}
+
+function parseBloom(params: URLSearchParams): BloomLevel | undefined {
+  const raw = params.get("bloom");
+  if (!raw) return undefined;
+  const n = Number.parseInt(raw, 10);
+  return (BLOOM_LEVELS as readonly number[]).includes(n)
+    ? (n as BloomLevel)
+    : undefined;
 }
 
 function scopeLabel(scope: DrillScope, db: ReturnType<typeof getAppDb>): string {
@@ -53,9 +63,11 @@ export default async function DrillRunPage({
   }
 
   const scope = parseScope(params);
+  const bloom = parseBloom(params);
   const db = getAppDb();
-  const label = scopeLabel(scope, db);
-  const pool = buildDrillPool(scope, { db });
+  const baseLabel = scopeLabel(scope, db);
+  const label = bloom ? `${baseLabel} · Bloom L${bloom}` : baseLabel;
+  const pool = buildDrillPool(scope, { db, bloomLevel: bloom });
 
   if (pool.questions.length === 0) {
     return (

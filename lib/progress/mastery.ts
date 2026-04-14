@@ -92,6 +92,36 @@ export function isMastered(level: LevelScore): boolean {
 }
 
 /**
+ * Highest mastered Bloom level for a task statement, or 0 if none mastered.
+ * Scans levels 1..6 in order and returns the max level where isMastered() holds.
+ * Used by the Bloom ladder UI to pick a "next level to attempt" (ceiling + 1,
+ * capped at 6).
+ */
+export function ceilingLevel(
+  perLevel: Partial<Record<BloomLevel, LevelScore>>,
+): BloomLevel | 0 {
+  let ceiling: BloomLevel | 0 = 0;
+  for (const level of BLOOM_LEVELS) {
+    const ls = perLevel[level];
+    if (ls && isMastered(ls)) ceiling = level;
+  }
+  return ceiling;
+}
+
+/**
+ * Suggested next Bloom level to drill: ceiling + 1, capped at 6. If nothing
+ * is mastered yet, returns 1 (start at Remember).
+ */
+export function nextLevel(
+  perLevel: Partial<Record<BloomLevel, LevelScore>>,
+): BloomLevel {
+  const c = ceilingLevel(perLevel);
+  if (c === 0) return 1;
+  if (c === 6) return 6;
+  return (c + 1) as BloomLevel;
+}
+
+/**
  * OD2-weighted summary across Bloom levels for a single task statement.
  * Input is level → score (0..1). Missing levels count as 0.
  * Returns 0..100.
@@ -117,4 +147,30 @@ export function domainSummary(tsSummaries: number[]): number {
   if (tsSummaries.length === 0) return 0;
   const sum = tsSummaries.reduce((a, b) => a + b, 0);
   return sum / tsSummaries.length;
+}
+
+/**
+ * Readiness / projected scaled score: OD2-weighted composite across domains.
+ *
+ *   readiness = Σ(domain_summary × domain_weight_bps) / Σ(domain_weight_bps)
+ *
+ * weight_bps is measured in basis points (100 bps = 1%). Returns 0..100.
+ * This is the projected-scaled-score formula rendered on the dashboard:
+ * it mirrors how the real exam composes domain scores for a passing grade,
+ * so it moves in lockstep with the mastery the user actually has.
+ * Empty input → 0. Zero-weight input → 0 (defensive — shouldn't happen in
+ * practice since every domain has a positive weight).
+ */
+export function computeReadiness(
+  inputs: Array<{ summary: number; weightBps: number }>,
+): number {
+  if (inputs.length === 0) return 0;
+  let weighted = 0;
+  let totalWeight = 0;
+  for (const d of inputs) {
+    weighted += d.summary * d.weightBps;
+    totalWeight += d.weightBps;
+  }
+  if (totalWeight === 0) return 0;
+  return weighted / totalWeight;
 }

@@ -138,13 +138,13 @@ Source of truth: `spec.md` (280 lines) and `CLAUDE.md`. Every task below traces 
 
 **Goal**: The dashboard that tells the user exactly where they stand.
 
-- [ ] Main dashboard `/` with: per-domain mastery bars, mock exam history (empty for now), flashcards-due (empty for now), last-session recap
-- [ ] Task statement detail view extended with six-level Bloom ladder + item counts (**AT13**)
-- [ ] Weak-area ranked list: top 5 task statements by (low summary × high domain weight), annotated with ceiling (**AT8**)
-- [ ] "Drill this" launches MCQ at ceiling+1 level (**AT14**)
-- [ ] 30 × 6 Bloom heatmap component; clicking a cell launches targeted drill (**AT15**)
-- [ ] Improvement-over-time chart (per-domain mastery over ≥14 days; mock scaled scores as they accumulate) (**AT9**)
-- [ ] Readiness estimate: projected scaled score derived from current mastery (document formula in-app)
+- [x] Main dashboard `/` with: per-domain mastery bars, mock exam history (empty for now), flashcards-due (empty for now), last-session recap
+- [x] Task statement detail view extended with six-level Bloom ladder + item counts (**AT13**)
+- [x] Weak-area ranked list: top 5 task statements by (low summary × high domain weight), annotated with ceiling (**AT8**)
+- [x] "Drill this" launches MCQ at ceiling+1 level (**AT14**)
+- [x] 30 × 6 Bloom heatmap component; clicking a cell launches targeted drill (**AT15**)
+- [x] Improvement-over-time chart (per-domain mastery over ≥14 days; mock scaled scores as they accumulate) (**AT9**)
+- [x] Readiness estimate: projected scaled score derived from current mastery (document formula in-app)
 
 **Done when**: AT8, AT9, AT13, AT14, AT15 all pass against synthetic + real event data.
 
@@ -320,7 +320,15 @@ Source of truth: `spec.md` (280 lines) and `CLAUDE.md`. Every task below traces 
   - **Intentionally deferred**: streaming narrative render (Phase 9 applies streaming to the tutor; the explainer doesn't need it — single tool_use response is fine); narrative regeneration UI button (generator supports `forceRegenerate`, just not wired to UI); the narrative's Claude call currently runs synchronously during the POST — if generation latency becomes a UX issue we'll revisit with SSE or a "generating…" poll loop.
 - Phase 5 — pending
 - Phase 6 — pending
-- Phase 7 — pending
+- Phase 7 — ✅ complete 2026-04-13
+  - **7a — dashboard aggregation + weak areas (AT8)**: new `lib/progress/dashboard.ts` with `buildDashboard(db)` → `{domains: DomainRollup[], weakAreas: WeakArea[], lastSession: LastSessionRecap, totals}` and `buildTaskStatementRollup(tsId, db)` for the TS detail page. Weak-area priority = `(100 - summary) × (weightBps / 10000)`. Top 5 cap (`WEAK_AREA_LIMIT`). Added `ceilingLevel()` / `nextLevel()` helpers to `mastery.ts`. Home page rewritten as a server component: readiness headline, per-domain bars (tiered color by summary), weak-areas card with ceiling pills, last-session recap, full TS list.
+  - **7b — Bloom ladder + drill-at-next (AT13, AT14)**: TS detail page (`app/study/task/[id]/`) now renders six-level `<BloomLadder>` with per-level score bar, item count, mastered/ceiling pills, per-row "Drill" link. Prominent "Drill at L{next} · {label}" CTA launches `/drill/run?scope=task&id=X&bloom=N`. `buildDrillPool` gained an optional `bloomLevel` filter, `/drill/run` parses `?bloom=N` and passes through. Added `countQuestionsForTaskByLevel(tsId, db)` for the ladder's per-cell item counts.
+  - **7c — Bloom heatmap (AT15)**: new `app/BloomHeatmap.tsx` (server component) renders a 30×6 matrix (30 task statements × Bloom L1–L6). Cell color tiers: mastered = green, score ≥ 0.6 = amber, ≥ 0.3 = orange, any events but < 0.3 = red, no events = zinc. Cells with `activeQuestions > 0` render as deep-link `<Link>`s to the targeted drill; cells with 0 active questions render as inactive `<td>`s with an explanatory tooltip (not a dead-end). Added `countAllActiveQuestionsByCell(db)` returning `Map<"tsId|level", number>` — one query for all 180 cells.
+  - **7d — improvement trend + readiness (AT9)**: new `lib/progress/trend.ts` exports `buildTrendSeries(db, {days=30, now?, halfLifeDays?})` → `TrendSeries {days, points: [{date, timestamp, domains: {D1: 0..100, ...}, readiness}], domains}`. Event-log replay (not snapshot diff): pulls events once, buckets by `(tsId|level)`, then for each end-of-day boundary walks back through the time-sorted bucket, early-terminating when `ts > asOf`. Cost budget documented: 30 × 30 × 6 = 5400 `computeLevelScore` calls per render; single-user render < 10ms. Added `computeReadiness()` to `mastery.ts` — OD2-weighted composite `Σ(domain_summary × weight_bps) / Σ(weight_bps)`. New `app/TrendChart.tsx` (inline SVG, no chart lib): 800×220 viewBox, 5 gridlines (0/25/50/75/100), thin per-domain polylines (stroke 1.5, opacity 0.65) under a bold overall-readiness polyline (stroke 2.5, slate-900), X-axis first/last date labels, legend with per-domain current values. `<ReadinessBadge>` shows tier-colored pill (green ≥80, amber ≥60, else red) with the formula in its `title`. Home page header updated to lead with `"Readiness {pct(readiness)} · overall {pct(overallSummary)} · mastered …"`.
+  - **Tests**: 175 total, all green (was 144). Added `tests/dashboard.test.ts` (11 cases: `ceilingLevel`/`nextLevel` edges, dashboard empty-safe, per-level rollup, weak-area ranking + top-5 cap, ceiling annotation, last-session recap, overall summary, `buildTaskStatementRollup` unknown + populated) and `tests/trend-readiness.test.ts` (11 cases: `computeReadiness` empty/zero-weight/weighted-mean/heavy-domain-dominance; `buildTrendSeries` empty-DB zeroed, ordering oldest→newest, today's event shows on today's point, monotonic accumulation under `halfLifeDays: 365`, events outside 30-day window still count in today's score, cross-domain isolation, readiness weighted by `weight_bps`).
+  - **Live smoke test (AT9)**: dev server started against the real DB (no progress events yet), `curl /` returned 200 with the full trend section: SVG `viewBox="0 0 800 220"`, 30 points per domain polyline, "Improvement over 30 days (AT9)" heading, "Readiness 0%" badge with formula tooltip. `BloomHeatmap` and weak-area card render as expected. Typecheck + lint clean.
+  - **Design decisions**: trend-series math replays the event log rather than diffing `mastery_snapshots` — snapshots are point-in-time only, whereas the event log preserves as-of history for free. End-of-day timestamp boundary (23:59:59.999) means drills finished "today" show up on today's point, not tomorrow's. Inline SVG chart over a library keeps the dep footprint minimal and gives full control over dark-mode + print styling. Domain-summary rollup stays an unweighted mean of TS summaries (consistent with Phase 3's decision) — `weight_bps` only enters at the readiness composite, where it's the projected-scaled-score formula the exam actually uses.
+  - **Intentionally deferred**: mock-exam scaled-score overlay on the trend chart lands in Phase 10 when mock attempts start producing data (the TrendChart copy hints at this with a "Phase 10" note). Per-user chart zoom / date-range picker — the 30-day window is plenty for a single user on a 30-day study cadence. A snapshot-derived fast path for the trend (vs event-log replay) — current replay cost is under 10ms at single-user scale, so optimization is YAGNI.
 - Phase 8 — pending
 - Phase 9 — pending
 - Phase 10 — pending

@@ -7,7 +7,9 @@ import type { Db } from "../lib/db";
 import { schema } from "../lib/db";
 import {
   buildDrillPool,
+  countAllActiveQuestionsByCell,
   countQuestionsByScope,
+  countQuestionsForTaskByLevel,
   DEFAULT_DRILL_LIMIT,
 } from "../lib/study/drill";
 
@@ -216,6 +218,56 @@ describe("buildDrillPool", () => {
     expect(pool.questions[0].domainId).toBe("D1");
     handle.close();
   });
+
+  it("bloomLevel option filters by question.bloom_level (AT14)", () => {
+    seedQuestion(handle.db, {
+      id: "Q1",
+      taskStatementId: "TS1",
+      bloomLevel: 2,
+    });
+    seedQuestion(handle.db, {
+      id: "Q2",
+      taskStatementId: "TS1",
+      bloomLevel: 3,
+    });
+    seedQuestion(handle.db, {
+      id: "Q3",
+      taskStatementId: "TS1",
+      bloomLevel: 3,
+    });
+    const pool = buildDrillPool(
+      { type: "task", id: "TS1" },
+      { db: handle.db, bloomLevel: 3 },
+    );
+    expect(pool.questions.map((q) => q.id).sort()).toEqual(["Q2", "Q3"]);
+    expect(pool.availableCount).toBe(2);
+    handle.close();
+  });
+
+  it("bloomLevel filter composes with scope + active filter", () => {
+    seedQuestion(handle.db, {
+      id: "Q1",
+      taskStatementId: "TS1",
+      bloomLevel: 2,
+    });
+    seedQuestion(handle.db, {
+      id: "Q2",
+      taskStatementId: "TS2",
+      bloomLevel: 2,
+    });
+    seedQuestion(handle.db, {
+      id: "Q3",
+      taskStatementId: "TS1",
+      bloomLevel: 2,
+      status: "retired",
+    });
+    const pool = buildDrillPool(
+      { type: "domain", id: "D1" },
+      { db: handle.db, bloomLevel: 2 },
+    );
+    expect(pool.questions.map((q) => q.id).sort()).toEqual(["Q1", "Q2"]);
+    handle.close();
+  });
 });
 
 describe("countQuestionsByScope", () => {
@@ -264,6 +316,69 @@ describe("countQuestionsByScope", () => {
     expect(c.byDomain).toEqual([]);
     expect(c.byTaskStatement).toEqual([]);
     expect(c.byScenario).toEqual([]);
+    handle.close();
+  });
+});
+
+describe("countQuestionsForTaskByLevel", () => {
+  let handle: ReturnType<typeof freshDb>;
+  beforeEach(() => {
+    handle = freshDb();
+    seedCurriculum(handle.db);
+  });
+
+  it("returns zero counts for all 6 levels when no questions exist", () => {
+    const c = countQuestionsForTaskByLevel("TS1", handle.db);
+    expect(c).toEqual({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 });
+    handle.close();
+  });
+
+  it("groups active questions by Bloom level and ignores retired", () => {
+    seedQuestion(handle.db, { id: "Q1", taskStatementId: "TS1", bloomLevel: 1 });
+    seedQuestion(handle.db, { id: "Q2", taskStatementId: "TS1", bloomLevel: 2 });
+    seedQuestion(handle.db, { id: "Q3", taskStatementId: "TS1", bloomLevel: 2 });
+    seedQuestion(handle.db, {
+      id: "Q4",
+      taskStatementId: "TS1",
+      bloomLevel: 2,
+      status: "retired",
+    });
+    seedQuestion(handle.db, { id: "Q5", taskStatementId: "TS2", bloomLevel: 3 });
+    const c = countQuestionsForTaskByLevel("TS1", handle.db);
+    expect(c).toEqual({ 1: 1, 2: 2, 3: 0, 4: 0, 5: 0, 6: 0 });
+    handle.close();
+  });
+});
+
+describe("countAllActiveQuestionsByCell", () => {
+  let handle: ReturnType<typeof freshDb>;
+  beforeEach(() => {
+    handle = freshDb();
+    seedCurriculum(handle.db);
+  });
+
+  it("returns an empty map when the bank is empty", () => {
+    const m = countAllActiveQuestionsByCell(handle.db);
+    expect(m.size).toBe(0);
+    handle.close();
+  });
+
+  it("groups by tsId|level and ignores retired", () => {
+    seedQuestion(handle.db, { id: "Q1", taskStatementId: "TS1", bloomLevel: 2 });
+    seedQuestion(handle.db, { id: "Q2", taskStatementId: "TS1", bloomLevel: 2 });
+    seedQuestion(handle.db, { id: "Q3", taskStatementId: "TS1", bloomLevel: 3 });
+    seedQuestion(handle.db, { id: "Q4", taskStatementId: "TS2", bloomLevel: 1 });
+    seedQuestion(handle.db, {
+      id: "Q5",
+      taskStatementId: "TS2",
+      bloomLevel: 1,
+      status: "retired",
+    });
+    const m = countAllActiveQuestionsByCell(handle.db);
+    expect(m.get("TS1|2")).toBe(2);
+    expect(m.get("TS1|3")).toBe(1);
+    expect(m.get("TS2|1")).toBe(1);
+    expect(m.get("TS3|1")).toBeUndefined();
     handle.close();
   });
 });

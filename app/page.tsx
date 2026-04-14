@@ -1,87 +1,69 @@
-import { asc } from "drizzle-orm";
 import Link from "next/link";
-import { getAppDb, schema } from "@/lib/db";
+import { getAppDb } from "@/lib/db";
+import { buildDashboard, type WeakArea } from "@/lib/progress/dashboard";
+import { computeReadiness } from "@/lib/progress/mastery";
+import { buildTrendSeries } from "@/lib/progress/trend";
 import { getSettingsStatus } from "@/lib/settings";
+import { countAllActiveQuestionsByCell } from "@/lib/study/drill";
+import BloomHeatmap from "./BloomHeatmap";
+import TrendChart from "./TrendChart";
 
 export const dynamic = "force-dynamic";
+
+function pct(n: number): string {
+  return `${n.toFixed(0)}%`;
+}
+
+function barColor(summary: number): string {
+  if (summary >= 80) return "bg-green-500";
+  if (summary >= 50) return "bg-amber-500";
+  if (summary >= 20) return "bg-orange-500";
+  return "bg-red-500";
+}
+
+function MasteryBar({ value }: { value: number }) {
+  const pctValue = Math.max(0, Math.min(100, value));
+  return (
+    <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+      <div
+        className={`h-full rounded-full ${barColor(pctValue)} transition-[width] duration-500`}
+        style={{ width: `${pctValue}%` }}
+      />
+    </div>
+  );
+}
+
+function CeilingPill({ ceiling }: { ceiling: WeakArea["ceiling"] }) {
+  if (ceiling === 0) {
+    return (
+      <span className="rounded-full bg-zinc-200 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+        no ceiling
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full bg-indigo-100 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-300">
+      ceiling L{ceiling}
+    </span>
+  );
+}
 
 export default async function Home() {
   const db = getAppDb();
   const status = getSettingsStatus(db);
-  const domains = status.apiKeyConfigured
-    ? db.select().from(schema.domains).orderBy(asc(schema.domains.orderIndex)).all()
-    : [];
-  const taskStatements = status.apiKeyConfigured
-    ? db
-        .select()
-        .from(schema.taskStatements)
-        .orderBy(asc(schema.taskStatements.orderIndex))
-        .all()
-    : [];
-  return (
-    <main className="flex flex-1 flex-col items-center gap-8 p-8">
-      <header className="flex max-w-xl flex-col items-center gap-3 text-center">
-        <h1 className="text-4xl font-semibold tracking-tight">
-          CCA Foundations — Learning App
-        </h1>
-        <p className="text-zinc-600 dark:text-zinc-400">
-          Single-user study environment for the Claude Certified Architect
-          Foundations exam.
-        </p>
-      </header>
-      {status.apiKeyConfigured ? (
-        <div className="flex w-full max-w-3xl flex-col gap-6">
-          <div className="flex items-center justify-between rounded-xl border border-zinc-200 px-4 py-3 text-sm dark:border-zinc-800">
-            <span className="text-green-700 dark:text-green-400">
-              API key ({status.apiKeyRedacted}) · {status.defaultModel}
-            </span>
-            <div className="flex items-baseline gap-4">
-              <Link
-                href="/drill"
-                className="text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-              >
-                Drill
-              </Link>
-              <Link
-                href="/admin/coverage"
-                className="text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-              >
-                Coverage
-              </Link>
-              <Link
-                href="/settings"
-                className="text-zinc-600 underline hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-              >
-                Settings
-              </Link>
-            </div>
-          </div>
-          {domains.map((d) => (
-            <section key={d.id} className="flex flex-col gap-2">
-              <h2 className="text-xs font-mono uppercase tracking-widest text-zinc-500">
-                {d.id} · {d.title}
-              </h2>
-              <ul className="flex flex-col gap-1">
-                {taskStatements
-                  .filter((t) => t.domainId === d.id)
-                  .map((t) => (
-                    <li key={t.id}>
-                      <Link
-                        href={`/study/task/${t.id}`}
-                        className="flex items-baseline gap-3 rounded-md px-3 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900"
-                      >
-                        <span className="font-mono text-xs text-zinc-500">
-                          {t.id}
-                        </span>
-                        <span>{t.title}</span>
-                      </Link>
-                    </li>
-                  ))}
-              </ul>
-            </section>
-          ))}
-        </div>
-      ) : (
+
+  if (!status.apiKeyConfigured) {
+    return (
+      <main className="flex flex-1 flex-col items-center gap-8 p-8">
+        <header className="flex max-w-xl flex-col items-center gap-3 text-center">
+          <h1 className="text-4xl font-semibold tracking-tight">
+            CCA Foundations — Learning App
+          </h1>
+          <p className="text-zinc-600 dark:text-zinc-400">
+            Single-user study environment for the Claude Certified Architect
+            Foundations exam.
+          </p>
+        </header>
         <div className="flex flex-col items-center gap-3">
           <p className="max-w-md text-sm text-amber-700 dark:text-amber-400">
             First run — add your Anthropic API key to enable Claude-powered
@@ -94,8 +76,255 @@ export default async function Home() {
             Set up API key
           </Link>
         </div>
-      )}
+      </main>
+    );
+  }
+
+  const dashboard = buildDashboard(db);
+  const cellCounts = countAllActiveQuestionsByCell(db);
+  const trend = buildTrendSeries(db);
+  const readiness = computeReadiness(
+    dashboard.domains.map((d) => ({
+      summary: d.summary,
+      weightBps: d.weightBps,
+    })),
+  );
+
+  return (
+    <main className="flex flex-1 flex-col items-center px-6 py-10">
+      <div className="flex w-full max-w-5xl flex-col gap-8">
+        <header className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h1 className="text-3xl font-semibold tracking-tight">
+              CCA Foundations
+            </h1>
+            <div className="flex items-baseline gap-4 text-sm">
+              <span className="text-green-700 dark:text-green-400">
+                {status.apiKeyRedacted} · {status.defaultModel}
+              </span>
+              <Link href="/drill" className="text-zinc-600 underline dark:text-zinc-400">
+                Drill
+              </Link>
+              <Link
+                href="/admin/coverage"
+                className="text-zinc-600 underline dark:text-zinc-400"
+              >
+                Coverage
+              </Link>
+              <Link
+                href="/settings"
+                className="text-zinc-600 underline dark:text-zinc-400"
+              >
+                Settings
+              </Link>
+            </div>
+          </div>
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Readiness {pct(readiness)} · overall {pct(dashboard.totals.overallSummary)}{" "}
+            · mastered {dashboard.totals.masteredCells}/{dashboard.totals.totalCells}{" "}
+            Bloom cells across {dashboard.totals.activeTaskStatements} task
+            statements.
+          </p>
+        </header>
+
+        <section className="flex flex-col gap-4">
+          <h2 className="text-sm font-mono uppercase tracking-widest text-zinc-500">
+            Mastery by domain
+          </h2>
+          <ul className="flex flex-col gap-4">
+            {dashboard.domains.map((d) => {
+              const mastered = d.taskStatements.reduce(
+                (a, t) => a + t.levels.filter((l) => l.mastered).length,
+                0,
+              );
+              const cellsTotal = d.taskStatements.length * 6;
+              return (
+                <li key={d.domainId} className="flex flex-col gap-2">
+                  <div className="flex items-baseline justify-between gap-3 text-sm">
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span className="font-mono text-xs text-zinc-500">
+                        {d.domainId}
+                      </span>
+                      <span className="text-zinc-800 dark:text-zinc-200">
+                        {d.title}
+                      </span>
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+                        weight {(d.weightBps / 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-3 font-mono text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>{pct(d.summary)}</span>
+                      <span className="text-zinc-500">
+                        {mastered}/{cellsTotal}
+                      </span>
+                    </div>
+                  </div>
+                  <MasteryBar value={d.summary} />
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+
+        <section className="flex flex-col gap-4 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-sm font-mono uppercase tracking-widest text-zinc-500">
+              Weak areas (AT8)
+            </h2>
+            <span className="text-xs text-zinc-500">
+              gap × domain weight · top {dashboard.weakAreas.length}
+            </span>
+          </div>
+          {dashboard.weakAreas.length === 0 ? (
+            <p className="text-sm text-zinc-500">No task statements yet.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {dashboard.weakAreas.map((w) => (
+                <li
+                  key={w.taskStatementId}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
+                >
+                  <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-2">
+                    <span className="font-mono text-xs text-zinc-500">
+                      {w.taskStatementId}
+                    </span>
+                    <span className="truncate text-zinc-800 dark:text-zinc-200">
+                      {w.title}
+                    </span>
+                    <CeilingPill ceiling={w.ceiling} />
+                  </div>
+                  <div className="flex items-baseline gap-3 font-mono text-xs">
+                    <span className="text-zinc-600 dark:text-zinc-400">
+                      {pct(w.summary)}
+                    </span>
+                    <span className="text-zinc-500">
+                      prio {w.priority.toFixed(1)}
+                    </span>
+                    <Link
+                      href={`/study/task/${encodeURIComponent(w.taskStatementId)}`}
+                      className="text-indigo-600 underline dark:text-indigo-400"
+                    >
+                      Open
+                    </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <TrendChart series={trend} readiness={readiness} />
+
+        <BloomHeatmap domains={dashboard.domains} cellCounts={cellCounts} />
+
+        <section className="grid gap-5 md:grid-cols-2">
+          <LastSession recap={dashboard.lastSession} />
+          <Placeholders />
+        </section>
+
+        <section className="flex flex-col gap-4">
+          <h2 className="text-sm font-mono uppercase tracking-widest text-zinc-500">
+            All task statements
+          </h2>
+          <div className="flex flex-col gap-4">
+            {dashboard.domains.map((d) => (
+              <div key={d.domainId} className="flex flex-col gap-2">
+                <h3 className="text-xs font-mono uppercase tracking-widest text-zinc-500">
+                  {d.domainId} · {d.title}
+                </h3>
+                <ul className="flex flex-col gap-1">
+                  {d.taskStatements.map((t) => (
+                    <li key={t.taskStatementId}>
+                      <Link
+                        href={`/study/task/${encodeURIComponent(t.taskStatementId)}`}
+                        className="flex items-baseline justify-between gap-3 rounded-md px-3 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                      >
+                        <div className="flex flex-wrap items-baseline gap-2">
+                          <span className="font-mono text-xs text-zinc-500">
+                            {t.taskStatementId}
+                          </span>
+                          <span>{t.title}</span>
+                        </div>
+                        <div className="flex items-baseline gap-3 font-mono text-xs text-zinc-500">
+                          <span>{pct(t.summary)}</span>
+                          <span>
+                            {t.ceiling === 0 ? "—" : `L${t.ceiling}`}
+                          </span>
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
     </main>
   );
 }
 
+function LastSession({
+  recap,
+}: {
+  recap: ReturnType<typeof buildDashboard>["lastSession"];
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+      <h2 className="text-sm font-mono uppercase tracking-widest text-zinc-500">
+        Last session
+      </h2>
+      {recap.totalEvents === 0 ? (
+        <p className="text-sm text-zinc-500">
+          No progress recorded yet. Start a drill to build your mastery map.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2 text-sm">
+          <p className="text-zinc-600 dark:text-zinc-400">
+            {recap.successCount}/{recap.totalEvents} correct across{" "}
+            {recap.uniqueCells} Bloom cell{recap.uniqueCells === 1 ? "" : "s"}
+            {recap.date
+              ? ` · ${new Date(recap.date).toLocaleString()}`
+              : null}
+          </p>
+          <ul className="flex flex-col gap-1">
+            {recap.events.slice(0, 5).map((e) => (
+              <li
+                key={e.id}
+                className="flex items-baseline gap-2 font-mono text-xs text-zinc-500"
+              >
+                <span
+                  className={
+                    e.success
+                      ? "text-green-600 dark:text-green-400"
+                      : "text-red-600 dark:text-red-400"
+                  }
+                >
+                  {e.success ? "✓" : "✗"}
+                </span>
+                <span className="truncate text-zinc-700 dark:text-zinc-300">
+                  {e.taskStatementId} L{e.bloomLevel}
+                </span>
+                <span>{e.kind}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Placeholders() {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-dashed border-zinc-300 p-5 text-sm dark:border-zinc-700">
+      <h2 className="text-sm font-mono uppercase tracking-widest text-zinc-500">
+        Coming soon
+      </h2>
+      <ul className="flex flex-col gap-1.5 text-zinc-500">
+        <li>Mock exam history — Phase 10</li>
+        <li>Flashcards due — Phase 8</li>
+      </ul>
+    </div>
+  );
+}

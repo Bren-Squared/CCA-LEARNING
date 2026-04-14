@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../db";
 import { getAppDb, schema } from "../db";
+import type { BloomLevel } from "../progress/mastery";
 
 /**
  * Drill scope. `type: "all"` pulls from every active question in the bank.
@@ -77,7 +78,12 @@ function filterTaskStatementIds(scope: DrillScope, db: Db): string[] | null {
  */
 export function buildDrillPool(
   scope: DrillScope,
-  opts: { db?: Db; limit?: number; seed?: number } = {},
+  opts: {
+    db?: Db;
+    limit?: number;
+    seed?: number;
+    bloomLevel?: BloomLevel;
+  } = {},
 ): DrillPool {
   const db = opts.db ?? getAppDb();
   const limit = opts.limit ?? DEFAULT_DRILL_LIMIT;
@@ -94,8 +100,12 @@ export function buildDrillPool(
     scope.type === "scenario"
       ? eq(schema.questions.scenarioId, scope.id)
       : undefined;
+  const bloomFilter =
+    opts.bloomLevel !== undefined
+      ? eq(schema.questions.bloomLevel, opts.bloomLevel)
+      : undefined;
 
-  const filters = [activeFilter, tsFilter, scenarioFilter].filter(
+  const filters = [activeFilter, tsFilter, scenarioFilter, bloomFilter].filter(
     (f): f is NonNullable<typeof f> => f !== undefined,
   );
 
@@ -152,6 +162,57 @@ export function buildDrillPool(
 export interface ScopeCount {
   key: string;
   count: number;
+}
+
+/**
+ * Batch version: one query, one map. Keyed by "tsId|level" for O(1) lookup
+ * from the heatmap renderer. Only active questions.
+ */
+export function countAllActiveQuestionsByCell(
+  db: Db = getAppDb(),
+): Map<string, number> {
+  const rows = db
+    .select({
+      taskStatementId: schema.questions.taskStatementId,
+      bloomLevel: schema.questions.bloomLevel,
+    })
+    .from(schema.questions)
+    .where(eq(schema.questions.status, "active"))
+    .all();
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    const key = `${r.taskStatementId}|${r.bloomLevel}`;
+    map.set(key, (map.get(key) ?? 0) + 1);
+  }
+  return map;
+}
+
+/**
+ * Count active questions for a single task statement, grouped by Bloom level
+ * (1..6). Missing levels are returned as 0. Used by the TS detail view to
+ * render a ladder with per-row drill availability.
+ */
+export function countQuestionsForTaskByLevel(
+  taskStatementId: string,
+  db: Db = getAppDb(),
+): Record<BloomLevel, number> {
+  const rows = db
+    .select({ bloomLevel: schema.questions.bloomLevel })
+    .from(schema.questions)
+    .where(
+      and(
+        eq(schema.questions.taskStatementId, taskStatementId),
+        eq(schema.questions.status, "active"),
+      ),
+    )
+    .all();
+  const result: Record<BloomLevel, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+  for (const r of rows) {
+    if (r.bloomLevel >= 1 && r.bloomLevel <= 6) {
+      result[r.bloomLevel as BloomLevel] += 1;
+    }
+  }
+  return result;
 }
 
 /**
