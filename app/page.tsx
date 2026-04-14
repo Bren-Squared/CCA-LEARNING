@@ -4,7 +4,9 @@ import { buildDashboard, type WeakArea } from "@/lib/progress/dashboard";
 import { computeReadiness } from "@/lib/progress/mastery";
 import { buildTrendSeries } from "@/lib/progress/trend";
 import { getSettingsStatus } from "@/lib/settings";
+import { countDueCards } from "@/lib/study/cards";
 import { countAllActiveQuestionsByCell } from "@/lib/study/drill";
+import { schema } from "@/lib/db";
 import BloomHeatmap from "./BloomHeatmap";
 import TrendChart from "./TrendChart";
 
@@ -83,6 +85,8 @@ export default async function Home() {
   const dashboard = buildDashboard(db);
   const cellCounts = countAllActiveQuestionsByCell(db);
   const trend = buildTrendSeries(db);
+  const dueFlashcards = countDueCards({ db });
+  const totalFlashcards = db.select({ id: schema.flashcards.id }).from(schema.flashcards).all().length;
   const readiness = computeReadiness(
     dashboard.domains.map((d) => ({
       summary: d.summary,
@@ -104,6 +108,17 @@ export default async function Home() {
               </span>
               <Link href="/drill" className="text-zinc-600 underline dark:text-zinc-400">
                 Drill
+              </Link>
+              <Link
+                href="/study/flashcards"
+                className="text-zinc-600 underline dark:text-zinc-400"
+              >
+                Flashcards
+                {dueFlashcards > 0 ? (
+                  <span className="ml-1 rounded-full bg-indigo-600 px-1.5 py-0.5 font-mono text-[10px] text-white">
+                    {dueFlashcards}
+                  </span>
+                ) : null}
               </Link>
               <Link
                 href="/admin/coverage"
@@ -219,7 +234,7 @@ export default async function Home() {
 
         <section className="grid gap-5 md:grid-cols-2">
           <LastSession recap={dashboard.lastSession} />
-          <Placeholders />
+          <FlashcardsCard due={dueFlashcards} total={totalFlashcards} />
         </section>
 
         <section className="flex flex-col gap-4">
@@ -315,16 +330,47 @@ function LastSession({
   );
 }
 
-function Placeholders() {
+function FlashcardsCard({ due, total }: { due: number; total: number }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-dashed border-zinc-300 p-5 text-sm dark:border-zinc-700">
+    <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
       <h2 className="text-sm font-mono uppercase tracking-widest text-zinc-500">
-        Coming soon
+        Flashcards
       </h2>
-      <ul className="flex flex-col gap-1.5 text-zinc-500">
-        <li>Mock exam history — Phase 10</li>
-        <li>Flashcards due — Phase 8</li>
-      </ul>
+      {total === 0 ? (
+        <p className="text-sm text-zinc-500">
+          No deck yet. Run{" "}
+          <code className="rounded bg-zinc-100 px-1 font-mono text-xs dark:bg-zinc-900">
+            npm run seed:flashcards
+          </code>{" "}
+          to generate one card set per task statement.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            {due === 0 ? (
+              <>
+                {total} card{total === 1 ? "" : "s"} in deck ·{" "}
+                <span className="text-green-700 dark:text-green-400">
+                  none due right now
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="font-semibold text-indigo-700 dark:text-indigo-400">
+                  {due} card{due === 1 ? "" : "s"} due
+                </span>{" "}
+                · {total} total
+              </>
+            )}
+          </p>
+          <Link
+            href="/study/flashcards"
+            className="self-start rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+          >
+            {due > 0 ? "Start review" : "Open queue"}
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

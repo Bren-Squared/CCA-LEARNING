@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "ingest": "tsx scripts/ingest.ts",
     "seed:progress": "tsx scripts/seed-progress.ts",
+    "seed:flashcards": "tsx scripts/seed-flashcards.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"
