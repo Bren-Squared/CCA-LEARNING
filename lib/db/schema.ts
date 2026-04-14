@@ -128,6 +128,7 @@ export const preparationSteps = sqliteTable(
     rubric: text("rubric", { mode: "json" }).$type<
       Record<string, unknown>
     >(),
+    rubricGeneratedAt: integer("rubric_generated_at", { mode: "timestamp_ms" }),
   },
 );
 

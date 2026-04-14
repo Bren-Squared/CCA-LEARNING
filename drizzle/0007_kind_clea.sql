@@ -1,0 +1,1 @@
+ALTER TABLE `preparation_steps` ADD `rubric_generated_at` integer;
