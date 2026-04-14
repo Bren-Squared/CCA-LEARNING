@@ -112,6 +112,18 @@ export function setBulkCostCeilingUsd(usd: number, db: Db = getDb()): void {
     .run();
 }
 
+export function setDarkMode(enabled: boolean, db: Db = getDb()): void {
+  ensureRow(db);
+  db.update(schema.settings)
+    .set({ darkMode: enabled })
+    .where(eq(schema.settings.id, SINGLETON_ID))
+    .run();
+}
+
+export function getDarkMode(db: Db = getDb()): boolean {
+  return readSettings(db).darkMode;
+}
+
 /**
  * Status shape safe to send to the browser. Never includes the key itself.
  */
@@ -123,6 +135,7 @@ export type SettingsStatus = {
   tokenBudgetMonthUsd: number;
   bulkCostCeilingUsd: number;
   reviewHalfLifeDays: number;
+  darkMode: boolean;
 };
 
 export function getSettingsStatus(db: Db = getDb()): SettingsStatus {
@@ -136,5 +149,6 @@ export function getSettingsStatus(db: Db = getDb()): SettingsStatus {
     tokenBudgetMonthUsd: row.tokenBudgetMonthUsd,
     bulkCostCeilingUsd: row.bulkCostCeilingUsd,
     reviewHalfLifeDays: row.reviewHalfLifeDays,
+    darkMode: row.darkMode,
   };
 }

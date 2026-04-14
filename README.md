@@ -44,18 +44,44 @@ Re-running with an unchanged PDF logs `no changes` and exits 0.
 ## Layout
 
 - `/app` — Next.js routes (App Router)
+  - `/study/tutor/[id]` — agentic task-statement tutor (streaming, D2)
+  - `/study/exercises` — preparation exercises with RD4 lazy rubrics
+  - `/study/flashcards` — spaced-review queue (keyboard-driven)
+  - `/drill` — untimed single-topic MCQ drill
+  - `/mock/[id]` — full timed mock exam
+  - `/admin/coverage` — Bloom × task-statement coverage matrix
+  - `/spend` — Claude API spend dashboard (FR5.4 / NFR4.2)
+  - `/shortcuts` — in-app keyboard reference (NFR5.2)
+  - `/settings` — API key, default model, review intensity, **dark mode** (NFR5.3)
 - `/lib/db` — Drizzle schema and client
 - `/lib/curriculum` — PDF parser, ingest persistence, Bloom classifier
-- `/lib/claude` — Anthropic client, prompts, tool schemas (Phase 2)
-- `/lib/progress` — mastery math, SRS scheduler (Phase 3 onward)
+- `/lib/claude` — Anthropic client, prompts, roles, tool schemas (D2.2 / D2.3)
+- `/lib/progress` — mastery math + append-only event writer
+- `/lib/tutor` — agentic loop (stop_reason-driven control flow)
+- `/lib/exercises` — rubric generator + step grader
+- `/lib/spend` — MTD + session-aware spend summaries
+- `/lib/settings` — AES-256-GCM key crypto + singleton accessors
 - `/scripts/ingest.ts` — one-shot PDF → DB
 - `/drizzle` — migration SQL + metadata
-- `/prompts` — versioned prompt templates
+- `/prompts` — versioned prompt templates with YAML frontmatter
 - `/data` — SQLite file + exam guide PDF (both gitignored)
 - `.claude/` — project-scoped Claude Code skills, commands, and path rules (dogfooding Domain 3)
+
+## Spend tracking (FR5.4 / NFR4.2)
+
+Every Claude call is logged to `claude_call_log` with tokens, cost, stop_reason, and duration. `/spend` shows:
+
+- month-to-date cost vs. the configured monthly budget (the bar turns amber at 80% — the NFR4.2 soft warning — and red at 100%);
+- current session (a burst of calls with no gap > 30 min);
+- breakdowns by role and model;
+- a table of the last 20 calls with timings + stop reasons.
+
+The dashboard home page carries a banner when the soft warning is tripped, linking to `/settings` to raise the budget. Estimates are derived from the rate card in `lib/claude/tokens.ts`; they don't replace the Anthropic console invoice.
 
 ## Known limitations / approximations
 
 - **Scaled score** (100–1000, 720 pass) is a two-segment linear approximation (RD2). Anthropic doesn't publish the official raw-to-scaled formula; the app shows a banner on mock exam results.
+- **Spend estimates are indicative.** The token-to-dollar math uses the rate card baked into `lib/claude/tokens.ts` as of the last deployment. If Anthropic updates pricing, edit that file.
+- **Bloom classification for seed questions is heuristic without an API key.** Re-run `npm run ingest` after pasting your key in `/settings` to replace heuristic classifications with real Claude calls.
 - `data/exam-guide.pdf` is the single source of truth. Re-ingesting an updated PDF replaces curriculum content but preserves user progress (append-only events).
 - Single local user, no auth, no deployment — by design.

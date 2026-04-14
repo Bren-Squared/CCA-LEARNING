@@ -10,6 +10,7 @@ type Status = {
   tokenBudgetMonthUsd: number;
   bulkCostCeilingUsd: number;
   reviewHalfLifeDays: number;
+  darkMode: boolean;
 };
 
 const MODELS = ["claude-sonnet-4-6", "claude-opus-4-6"];
@@ -20,6 +21,7 @@ export default function SettingsForm({ initial }: { initial: Status }) {
   const [model, setModel] = useState(initial.defaultModel);
   const [halfLife, setHalfLife] = useState(initial.reviewHalfLifeDays);
   const [ceiling, setCeiling] = useState(initial.bulkCostCeilingUsd);
+  const [darkMode, setDarkMode] = useState(initial.darkMode);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{
     kind: "ok" | "err";
@@ -30,7 +32,13 @@ export default function SettingsForm({ initial }: { initial: Status }) {
     setModel(status.defaultModel);
     setHalfLife(status.reviewHalfLifeDays);
     setCeiling(status.bulkCostCeilingUsd);
-  }, [status.defaultModel, status.reviewHalfLifeDays, status.bulkCostCeilingUsd]);
+    setDarkMode(status.darkMode);
+  }, [
+    status.defaultModel,
+    status.reviewHalfLifeDays,
+    status.bulkCostCeilingUsd,
+    status.darkMode,
+  ]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -44,6 +52,7 @@ export default function SettingsForm({ initial }: { initial: Status }) {
         body.reviewHalfLifeDays = halfLife;
       if (ceiling !== status.bulkCostCeilingUsd)
         body.bulkCostCeilingUsd = ceiling;
+      if (darkMode !== status.darkMode) body.darkMode = darkMode;
       if (Object.keys(body).length === 0) {
         setMessage({ kind: "err", text: "Nothing changed." });
         setPending(false);
@@ -64,9 +73,14 @@ export default function SettingsForm({ initial }: { initial: Status }) {
             : "unexpected response";
         setMessage({ kind: "err", text: errText });
       } else {
-        setStatus(data as Status);
+        const next = data as Status;
+        setStatus(next);
         setApiKey("");
         setMessage({ kind: "ok", text: "Settings saved." });
+        // Reflect dark-mode change immediately without waiting for a reload.
+        if (typeof document !== "undefined") {
+          document.documentElement.classList.toggle("dark", next.darkMode);
+        }
       }
     } catch (err) {
       setMessage({
@@ -168,6 +182,31 @@ export default function SettingsForm({ initial }: { initial: Status }) {
         <p className="text-xs text-zinc-600 dark:text-zinc-400">
           Question generation and other bulk jobs will pause for confirmation
           if the projected cost exceeds this ceiling.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <label className="text-sm font-medium" htmlFor="dark-mode">
+          Appearance
+        </label>
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            id="dark-mode"
+            type="checkbox"
+            checked={darkMode}
+            onChange={(e) => setDarkMode(e.target.checked)}
+            className="h-4 w-4 accent-zinc-900 dark:accent-zinc-100"
+          />
+          <span>
+            Dark mode{" "}
+            <span className="font-mono text-xs text-zinc-500">
+              ({darkMode ? "on" : "off"})
+            </span>
+          </span>
+        </label>
+        <p className="text-xs text-zinc-600 dark:text-zinc-400">
+          Preference is persisted per install (NFR5.3). Applies on next page
+          render; the preview below updates immediately on save.
         </p>
       </div>
 

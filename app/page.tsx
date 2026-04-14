@@ -7,6 +7,7 @@ import { getSettingsStatus } from "@/lib/settings";
 import { countDueCards } from "@/lib/study/cards";
 import { countAllActiveQuestionsByCell } from "@/lib/study/drill";
 import { schema } from "@/lib/db";
+import { readBudgetStatus } from "@/lib/spend/summary";
 import BloomHeatmap from "./BloomHeatmap";
 import TrendChart from "./TrendChart";
 
@@ -85,6 +86,7 @@ export default async function Home() {
   const dashboard = buildDashboard(db);
   const cellCounts = countAllActiveQuestionsByCell(db);
   const trend = buildTrendSeries(db);
+  const budget = readBudgetStatus(db);
   const dueFlashcards = countDueCards({ db });
   const totalFlashcards = db.select({ id: schema.flashcards.id }).from(schema.flashcards).all().length;
   const readiness = computeReadiness(
@@ -151,6 +153,18 @@ export default async function Home() {
                 Coverage
               </Link>
               <Link
+                href="/spend"
+                className="text-zinc-600 underline dark:text-zinc-400"
+              >
+                Spend
+              </Link>
+              <Link
+                href="/shortcuts"
+                className="text-zinc-600 underline dark:text-zinc-400"
+              >
+                Shortcuts
+              </Link>
+              <Link
                 href="/settings"
                 className="text-zinc-600 underline dark:text-zinc-400"
               >
@@ -164,6 +178,34 @@ export default async function Home() {
             Bloom cells across {dashboard.totals.activeTaskStatements} task
             statements.
           </p>
+          {budget.softWarning ? (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              <strong>Budget warning (NFR4.2):</strong> you&apos;re at{" "}
+              {(budget.ratio * 100).toFixed(1)}% of the $
+              {budget.budgetMonthUsd.toFixed(2)} monthly spend cap ($
+              {budget.costMtdUsd.toFixed(2)} used). Raise it in{" "}
+              <Link href="/settings" className="underline">
+                Settings
+              </Link>
+              {" · "}
+              <Link href="/spend" className="underline">
+                view spend breakdown
+              </Link>
+              .
+            </p>
+          ) : null}
+          {!budget.softWarning && budget.costMtdUsd > 0 ? (
+            <p className="text-xs text-zinc-500">
+              Monthly Claude spend: ${budget.costMtdUsd.toFixed(2)} /{" "}
+              ${budget.budgetMonthUsd.toFixed(2)} ({(budget.ratio * 100).toFixed(0)}%) ·{" "}
+              <Link
+                href="/spend"
+                className="underline decoration-zinc-300 dark:decoration-zinc-700"
+              >
+                details
+              </Link>
+            </p>
+          ) : null}
         </header>
 
         <section className="flex flex-col gap-4">

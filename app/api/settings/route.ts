@@ -5,6 +5,7 @@ import {
   getSettingsStatus,
   setApiKey,
   setBulkCostCeilingUsd,
+  setDarkMode,
   setDefaultModel,
   setReviewHalfLifeDays,
 } from "@/lib/settings";
@@ -23,6 +24,7 @@ const postSchema = z
     clearApiKey: z.boolean().optional(),
     reviewHalfLifeDays: z.number().min(1).max(120).optional(),
     bulkCostCeilingUsd: z.number().min(0).max(50).optional(),
+    darkMode: z.boolean().optional(),
   })
   .refine(
     (v) =>
@@ -30,7 +32,8 @@ const postSchema = z
       v.defaultModel !== undefined ||
       v.clearApiKey === true ||
       v.reviewHalfLifeDays !== undefined ||
-      v.bulkCostCeilingUsd !== undefined,
+      v.bulkCostCeilingUsd !== undefined ||
+      v.darkMode !== undefined,
     { message: "at least one field required" },
   );
 
@@ -60,6 +63,8 @@ export async function POST(req: Request) {
       setReviewHalfLifeDays(parsed.data.reviewHalfLifeDays, db);
     if (parsed.data.bulkCostCeilingUsd !== undefined)
       setBulkCostCeilingUsd(parsed.data.bulkCostCeilingUsd, db);
+    if (parsed.data.darkMode !== undefined)
+      setDarkMode(parsed.data.darkMode, db);
   } catch (err) {
     return Response.json(
       { error: err instanceof Error ? err.message : "unknown error" },

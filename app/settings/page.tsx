@@ -18,15 +18,18 @@ export default async function SettingsPage() {
         </p>
       </div>
       <SettingsForm initial={status} />
-      <div className="w-full max-w-xl text-xs text-zinc-500 dark:text-zinc-500">
+      <div className="flex w-full max-w-xl flex-col gap-1 text-xs text-zinc-500">
         <p>
-          API spend dashboard and budget controls arrive in Phase 13. Smoke-test
-          the full wiring at{" "}
-          <a
-            className="underline"
-            href="/api/claude/hello"
-          >
-            /api/claude/hello
+          Track Claude API spend and the NFR4.2 soft-warning on the{" "}
+          <a className="underline" href="/spend">
+            spend dashboard
+          </a>
+          .
+        </p>
+        <p>
+          Keybinds are documented on the{" "}
+          <a className="underline" href="/shortcuts">
+            shortcuts page
           </a>
           .
         </p>
