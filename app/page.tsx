@@ -122,6 +122,12 @@ export default async function Home() {
                 Scenarios
               </Link>
               <Link
+                href="/mock"
+                className="text-zinc-600 underline dark:text-zinc-400"
+              >
+                Mock Exam
+              </Link>
+              <Link
                 href="/study/flashcards"
                 className="text-zinc-600 underline dark:text-zinc-400"
               >

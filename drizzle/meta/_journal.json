@@ -43,6 +43,13 @@
       "when": 1776181328127,
       "tag": "0005_petite_human_torch",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1776184239449,
+      "tag": "0006_tranquil_micromax",
+      "breakpoints": true
     }
   ]
 }

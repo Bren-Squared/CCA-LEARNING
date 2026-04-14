@@ -63,8 +63,8 @@ export default function TrendChart({
             Improvement over {series.days} days (AT9)
           </h2>
           <p className="text-xs text-zinc-500">
-            Recomputed from the event log at end-of-day boundaries. Mock exam
-            scaled scores will overlay here once Phase 10 lands.
+            Recomputed from the event log at end-of-day boundaries. Mock
+            attempts are tracked separately on the <code>/mock</code> page.
           </p>
         </div>
         <ReadinessBadge value={readiness} />

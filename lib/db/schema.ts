@@ -186,6 +186,7 @@ export const mockAttempts = sqliteTable("mock_attempts", {
   id: text("id").primaryKey(),
   startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+  durationMs: integer("duration_ms").notNull().default(7200000),
   status: text("status", {
     enum: ["in_progress", "submitted", "timeout", "reviewed"],
   })

@@ -1,0 +1,1 @@
+ALTER TABLE `mock_attempts` ADD `duration_ms` integer DEFAULT 7200000 NOT NULL;
