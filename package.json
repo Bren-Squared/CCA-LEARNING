@@ -12,6 +12,7 @@
     "ingest": "tsx scripts/ingest.ts",
     "seed:progress": "tsx scripts/seed-progress.ts",
     "seed:flashcards": "tsx scripts/seed-flashcards.ts",
+    "seed:scenarios": "tsx scripts/seed-scenario-prompts.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

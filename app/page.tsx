@@ -116,6 +116,12 @@ export default async function Home() {
                 Tutor
               </Link>
               <Link
+                href="/study/scenarios"
+                className="text-zinc-600 underline dark:text-zinc-400"
+              >
+                Scenarios
+              </Link>
+              <Link
                 href="/study/flashcards"
                 className="text-zinc-600 underline dark:text-zinc-400"
               >

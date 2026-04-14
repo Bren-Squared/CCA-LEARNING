@@ -220,6 +220,52 @@ export const preparationAttempts = sqliteTable("preparation_attempts", {
     .default(sql`(unixepoch('subsec') * 1000)`),
 });
 
+export const scenarioPrompts = sqliteTable(
+  "scenario_prompts",
+  {
+    id: text("id").primaryKey(),
+    scenarioId: text("scenario_id")
+      .notNull()
+      .references(() => scenarios.id, { onDelete: "cascade" }),
+    taskStatementId: text("task_statement_id")
+      .notNull()
+      .references(() => taskStatements.id, { onDelete: "cascade" }),
+    bloomLevel: integer("bloom_level").notNull(),
+    promptText: text("prompt_text").notNull(),
+    rubric: text("rubric", { mode: "json" })
+      .$type<Record<string, unknown>>(),
+    rubricGeneratedAt: integer("rubric_generated_at", { mode: "timestamp_ms" }),
+    orderIndex: integer("order_index").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch('subsec') * 1000)`),
+  },
+  (t) => [index("scenario_prompts_scenario_idx").on(t.scenarioId, t.orderIndex)],
+);
+
+export const scenarioAttempts = sqliteTable(
+  "scenario_attempts",
+  {
+    id: text("id").primaryKey(),
+    promptId: text("prompt_id")
+      .notNull()
+      .references(() => scenarioPrompts.id, { onDelete: "cascade" }),
+    answerText: text("answer_text").notNull(),
+    overallScore: real("overall_score").notNull(),
+    feedback: text("feedback", { mode: "json" })
+      .$type<Record<string, unknown>>()
+      .notNull(),
+    progressEventId: text("progress_event_id").references(
+      () => progressEvents.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch('subsec') * 1000)`),
+  },
+  (t) => [index("scenario_attempts_prompt_idx").on(t.promptId, t.createdAt)],
+);
+
 export const tutorSessions = sqliteTable("tutor_sessions", {
   id: text("id").primaryKey(),
   topicId: text("topic_id").notNull(),
@@ -347,3 +393,7 @@ export type ClaudeCallLog = typeof claudeCallLog.$inferSelect;
 export type NewClaudeCallLog = typeof claudeCallLog.$inferInsert;
 export type BulkGenJob = typeof bulkGenJobs.$inferSelect;
 export type NewBulkGenJob = typeof bulkGenJobs.$inferInsert;
+export type ScenarioPrompt = typeof scenarioPrompts.$inferSelect;
+export type NewScenarioPrompt = typeof scenarioPrompts.$inferInsert;
+export type ScenarioAttempt = typeof scenarioAttempts.$inferSelect;
+export type NewScenarioAttempt = typeof scenarioAttempts.$inferInsert;
