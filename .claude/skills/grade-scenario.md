@@ -52,8 +52,9 @@ Failure modes
   that failed; usually a cap (`model_answer` max, `reasoning` min) needs
   loosening in `lib/claude/roles/grader.ts` or the rubric drafter needs
   a nudge.
-- Missing `ANTHROPIC_API_KEY` — the grader short-circuits before calling
-  Claude. Set the key in `.env.local` and retry.
+- Missing API key — the grader short-circuits before calling Claude.
+  Configure it at `/settings` (stored encrypted in the app DB) or export
+  `ANTHROPIC_API_KEY` as an env fallback before running the script.
 
 Dogfoods D3.2 (Skill with `context: fork` + narrowed `allowed-tools`),
 AT17 (grader isolation), AT18 (dev-time skill execution).
