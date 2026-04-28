@@ -34,6 +34,25 @@ export const emitQuestionInputSchema = z.object({
     .min(1)
     .max(5)
     .describe("1=trivial recall, 5=multi-step reasoning"),
+  /**
+   * Phase 16 / E3 — non-negative indices into the task statement's
+   * `knowledge_bullets[]` (resp. `skills_bullets[]`) declaring which bullets
+   * the question tests. Either array MAY be empty, but at least one must be
+   * non-empty across the two — the question must trace to at least one
+   * bullet so coverage can be tracked.
+   */
+  knowledge_bullet_idxs: z
+    .array(z.number().int().min(0))
+    .default([])
+    .describe(
+      "0-based indices into the task statement's knowledge_bullets[] this question tests",
+    ),
+  skills_bullet_idxs: z
+    .array(z.number().int().min(0))
+    .default([])
+    .describe(
+      "0-based indices into the task statement's skills_bullets[] this question tests",
+    ),
 });
 
 export type EmitQuestionInput = z.infer<typeof emitQuestionInputSchema>;
@@ -64,6 +83,20 @@ export const emitQuestionTool: ToolDefinition<EmitQuestionInput, { ok: true }> =
       bloom_level: { type: "integer", minimum: 1, maximum: 6 },
       bloom_justification: { type: "string", minLength: 10 },
       difficulty: { type: "integer", minimum: 1, maximum: 5 },
+      knowledge_bullet_idxs: {
+        type: "array",
+        items: { type: "integer", minimum: 0 },
+        default: [],
+        description:
+          "Indices into knowledge_bullets[] this question tests (0-based). Empty allowed only when skills_bullet_idxs is non-empty.",
+      },
+      skills_bullet_idxs: {
+        type: "array",
+        items: { type: "integer", minimum: 0 },
+        default: [],
+        description:
+          "Indices into skills_bullets[] this question tests (0-based). Empty allowed only when knowledge_bullet_idxs is non-empty.",
+      },
     },
     required: [
       "stem",
@@ -73,6 +106,8 @@ export const emitQuestionTool: ToolDefinition<EmitQuestionInput, { ok: true }> =
       "bloom_level",
       "bloom_justification",
       "difficulty",
+      "knowledge_bullet_idxs",
+      "skills_bullet_idxs",
     ],
     additionalProperties: false,
   },

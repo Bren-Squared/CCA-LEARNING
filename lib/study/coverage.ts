@@ -21,15 +21,37 @@ export interface CoverageCell {
   gap: number;
 }
 
+export type BulletKind = "knowledge" | "skills";
+
+export interface BulletCoverageRow {
+  taskStatementId: string;
+  taskStatementTitle: string;
+  domainId: string;
+  kind: BulletKind;
+  /** 0-based index into the parent TS's `<kind>Bullets` array. */
+  bulletIdx: number;
+  bulletText: string;
+  questionCount: number;
+}
+
 export interface CoverageReport {
   cells: CoverageCell[];
   gaps: CoverageCell[];
+  /** Phase 16 / E3 — flat list of bullets with the count of active questions
+   *  citing them. Both kinds are interleaved; UI can group by domain → TS. */
+  bulletCoverage: BulletCoverageRow[];
+  /** Subset of bulletCoverage with `questionCount === 0` — the blind-spot
+   *  candidate list rendered on `/admin/coverage`. */
+  bulletBlindSpots: BulletCoverageRow[];
   totals: {
     activeQuestions: number;
     gapCells: number;
     gapQuestions: number;
     fullCells: number;
     totalCells: number;
+    /** Phase 16 — questions that haven't been backfilled with bullet idxs. */
+    questionsMissingBulletCitations: number;
+    bulletBlindSpotCount: number;
   };
 }
 
@@ -38,6 +60,11 @@ export interface CoverageReport {
  * in the bank. `gap` is `max(0, COVERAGE_TARGET - activeCount)` per cell;
  * `gaps` is the subset of cells with `gap > 0`, ordered for rendering
  * (domain → TS → bloom ascending). Pure DB read — no Claude calls.
+ *
+ * Phase 16 / E3 — also rolls up bullet-level coverage. Each task statement's
+ * Knowledge and Skills bullets are listed with the count of active questions
+ * citing them. Bullets with zero coverage feed `/admin/coverage`'s blind-spot
+ * panel.
  */
 export function buildCoverageReport(db: Db = getAppDb()): CoverageReport {
   const taskStatements = db
@@ -50,15 +77,33 @@ export function buildCoverageReport(db: Db = getAppDb()): CoverageReport {
     .select({
       taskStatementId: schema.questions.taskStatementId,
       bloomLevel: schema.questions.bloomLevel,
+      knowledgeBulletIdxs: schema.questions.knowledgeBulletIdxs,
+      skillsBulletIdxs: schema.questions.skillsBulletIdxs,
     })
     .from(schema.questions)
     .where(eq(schema.questions.status, "active"))
     .all();
 
   const counts = new Map<string, number>();
+  // Bullet citation tally: keyed `tsId|kind|idx` → count.
+  const bulletCounts = new Map<string, number>();
+  let questionsMissingBulletCitations = 0;
   for (const q of activeQuestions) {
     const key = `${q.taskStatementId}|${q.bloomLevel}`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
+    const k = q.knowledgeBulletIdxs ?? [];
+    const s = q.skillsBulletIdxs ?? [];
+    if (k.length === 0 && s.length === 0) {
+      questionsMissingBulletCitations += 1;
+    }
+    for (const idx of k) {
+      const bk = `${q.taskStatementId}|knowledge|${idx}`;
+      bulletCounts.set(bk, (bulletCounts.get(bk) ?? 0) + 1);
+    }
+    for (const idx of s) {
+      const bk = `${q.taskStatementId}|skills|${idx}`;
+      bulletCounts.set(bk, (bulletCounts.get(bk) ?? 0) + 1);
+    }
   }
 
   const cells: CoverageCell[] = [];
@@ -76,18 +121,49 @@ export function buildCoverageReport(db: Db = getAppDb()): CoverageReport {
     }
   }
 
+  const bulletCoverage: BulletCoverageRow[] = [];
+  for (const ts of taskStatements) {
+    ts.knowledgeBullets.forEach((text, idx) => {
+      bulletCoverage.push({
+        taskStatementId: ts.id,
+        taskStatementTitle: ts.title,
+        domainId: ts.domainId,
+        kind: "knowledge",
+        bulletIdx: idx,
+        bulletText: text,
+        questionCount: bulletCounts.get(`${ts.id}|knowledge|${idx}`) ?? 0,
+      });
+    });
+    ts.skillsBullets.forEach((text, idx) => {
+      bulletCoverage.push({
+        taskStatementId: ts.id,
+        taskStatementTitle: ts.title,
+        domainId: ts.domainId,
+        kind: "skills",
+        bulletIdx: idx,
+        bulletText: text,
+        questionCount: bulletCounts.get(`${ts.id}|skills|${idx}`) ?? 0,
+      });
+    });
+  }
+
+  const bulletBlindSpots = bulletCoverage.filter((b) => b.questionCount === 0);
   const gaps = cells.filter((c) => c.gap > 0);
   const gapQuestions = gaps.reduce((sum, c) => sum + c.gap, 0);
 
   return {
     cells,
     gaps,
+    bulletCoverage,
+    bulletBlindSpots,
     totals: {
       activeQuestions: activeQuestions.length,
       gapCells: gaps.length,
       gapQuestions,
       fullCells: cells.length - gaps.length,
       totalCells: cells.length,
+      questionsMissingBulletCitations,
+      bulletBlindSpotCount: bulletBlindSpots.length,
     },
   };
 }

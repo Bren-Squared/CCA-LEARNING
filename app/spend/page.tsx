@@ -1,6 +1,12 @@
 import Link from "next/link";
 import { getAppDb } from "@/lib/db";
-import { computeSpendSummary, SOFT_WARN_RATIO } from "@/lib/spend/summary";
+import {
+  CACHE_HIT_MIN_SAMPLE,
+  CACHE_HIT_WARN_THRESHOLD,
+  SOFT_WARN_RATIO,
+  computeSpendSummary,
+  type CacheStatsEntry,
+} from "@/lib/spend/summary";
 
 export const dynamic = "force-dynamic";
 
@@ -36,12 +42,6 @@ export default async function SpendPage() {
     <main className="flex flex-1 flex-col items-center px-6 py-10">
       <div className="flex w-full max-w-4xl flex-col gap-8">
         <header className="flex flex-col gap-2">
-          <Link
-            href="/"
-            className="text-xs text-zinc-500 underline-offset-2 hover:underline"
-          >
-            ← Dashboard
-          </Link>
           <p className="text-xs font-mono uppercase tracking-widest text-zinc-500">
             Claude API spend · FR5.4 · NFR4.2
           </p>
@@ -195,6 +195,8 @@ export default async function SpendPage() {
           )}
         </section>
 
+        <CacheEfficiencyPanel cacheStats={summary.cacheStats} />
+
         <section className="flex flex-col gap-4">
           <h2 className="text-sm font-mono uppercase tracking-widest text-zinc-500">
             By model · month-to-date
@@ -278,5 +280,119 @@ export default async function SpendPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+function hitRateColor(hitRate: number): string {
+  if (hitRate >= 0.7) return "bg-emerald-500";
+  if (hitRate >= 0.3) return "bg-amber-500";
+  return "bg-red-500";
+}
+
+function CacheEfficiencyPanel({ cacheStats }: { cacheStats: CacheStatsEntry[] }) {
+  const cacheable = cacheStats.filter((e) => e.expectsCache);
+  const noCache = cacheStats.filter((e) => !e.expectsCache);
+  const totalSavedCostUsd = cacheable.reduce((s, e) => s + e.savedCostUsd, 0);
+
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-sm font-mono uppercase tracking-widest text-zinc-500">
+          Cache efficiency · NFR4.3 · E1
+        </h2>
+        {cacheable.length > 0 ? (
+          <span className="font-mono text-xs text-zinc-500">
+            {usd(totalSavedCostUsd)} saved this month
+          </span>
+        ) : null}
+      </div>
+      {cacheStats.length === 0 ? (
+        <p className="text-sm text-zinc-500">
+          Nothing logged yet. Run a tutor turn or generate a question to see
+          cache metrics.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-5">
+          {cacheable.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+                Cache-enabled roles
+              </p>
+              <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
+                {cacheable.map((e) => (
+                  <CacheRow key={e.role} entry={e} />
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {noCache.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-zinc-500">
+                No-cache (by design)
+              </p>
+              <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
+                {noCache.map((e) => (
+                  <li
+                    key={e.role}
+                    className="flex items-baseline justify-between py-2 text-sm"
+                  >
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-mono">{e.role}</span>
+                      <span className="text-xs text-zinc-500">
+                        · {e.callCount} call{e.callCount === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <span className="text-xs text-zinc-500">no-cache</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <p className="text-xs text-zinc-500">
+            Hit rate = cache_read / (cache_read + cache_creation) per role.
+            Amber pill triggers when a cache-enabled role is below{" "}
+            {(CACHE_HIT_WARN_THRESHOLD * 100).toFixed(0)}% over at least{" "}
+            {CACHE_HIT_MIN_SAMPLE} calls — investigate the system prompt for
+            inadvertent per-call variation.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CacheRow({ entry }: { entry: CacheStatsEntry }) {
+  const hitPct = entry.hitRate * 100;
+  return (
+    <li className="flex flex-col gap-2 py-3 text-sm">
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="flex items-baseline gap-2">
+          <span className="font-mono">{entry.role}</span>
+          <span className="text-xs text-zinc-500">
+            · {entry.callCount} call{entry.callCount === 1 ? "" : "s"}
+          </span>
+          {entry.warn ? (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+              low hit rate
+            </span>
+          ) : null}
+        </div>
+        <span className="font-mono text-xs text-zinc-600 dark:text-zinc-400">
+          {hitPct.toFixed(1)}% · {usd(entry.savedCostUsd)} saved
+        </span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+        <div
+          className={`h-full rounded-full transition-[width] duration-500 ${hitRateColor(entry.hitRate)}`}
+          style={{ width: `${Math.min(100, hitPct)}%` }}
+        />
+      </div>
+      <div className="flex items-baseline justify-between font-mono text-[11px] text-zinc-500">
+        <span>
+          {kTokens(entry.cacheReadTokens)} read · {kTokens(entry.cacheCreationTokens)} created
+        </span>
+        <span>{kTokens(entry.savedInputTokenEquivalents)} tokens saved</span>
+      </div>
+    </li>
   );
 }

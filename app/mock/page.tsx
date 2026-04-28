@@ -46,11 +46,8 @@ export default function MockExamIndexPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-10 font-sans text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      <header className="mb-8 flex items-baseline justify-between">
+      <header className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight">Mock Exam</h1>
-        <Link href="/" className="text-sm text-zinc-600 underline dark:text-zinc-400">
-          ← Dashboard
-        </Link>
       </header>
 
       <section className="mb-10 rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">

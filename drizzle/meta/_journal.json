@@ -57,6 +57,13 @@
       "when": 1776185447663,
       "tag": "0007_kind_clea",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1777255724483,
+      "tag": "0008_rich_tyger_tiger",
+      "breakpoints": true
     }
   ]
 }

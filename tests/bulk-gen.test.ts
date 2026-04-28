@@ -120,6 +120,8 @@ function goodQuestionInput() {
     bloom_level: 2,
     bloom_justification: "Recognition-level recall of the SDK's stop_reason set.",
     difficulty: 2,
+    knowledge_bullet_idxs: [0],
+    skills_bullet_idxs: [],
   };
 }
 

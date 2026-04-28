@@ -75,6 +75,17 @@ function formatBullets(bullets: string[]): string {
     : bullets.map((b) => `- ${b}`).join("\n");
 }
 
+/**
+ * Phase 16 / E3 — bullets rendered with 0-based indices so the generator can
+ * cite which one(s) the question tests. Uses `[i] ` prefix to match the
+ * schema field shape (an array of 0-based ints).
+ */
+function formatBulletsIndexed(bullets: string[]): string {
+  return bullets.length === 0
+    ? "(none)"
+    : bullets.map((b, i) => `[${i}] ${b}`).join("\n");
+}
+
 function formatFewshotBlock(seedQuestions: typeof schema.questions.$inferSelect[]): string {
   if (seedQuestions.length === 0) {
     return "## Few-shot examples\n\n(No seed questions exist for this scope — author from scratch, preserving bullet wording.)";
@@ -98,6 +109,12 @@ function formatScenarioBlock(
     return "**Scenario**: none for this request — author a self-contained stem.";
   }
   return `**Scenario** (${scenario.id} — ${scenario.title}):\n${scenario.description}\n\nAll questions in this scenario share this framing. Do NOT re-state the scenario in your stem — refer to it as "the scenario above" or pull specific details as needed.`;
+}
+
+function formatExistingQuestionsBlock(stems: string[]): string {
+  if (stems.length === 0) return "";
+  const list = stems.map((s, i) => `${i + 1}. ${s}`).join("\n");
+  return `## Existing questions in this cell (DO NOT repeat)\n\nThe following ${stems.length} question${stems.length === 1 ? "" : "s"} already exist for this task statement at this Bloom level. Your new question MUST test a different angle, scenario, or concept. Do not re-use the same stem structure, situation, or core distinction.\n\n${list}`;
 }
 
 function formatRetryFeedback(log: AttemptLogEntry[]): string {
@@ -135,14 +152,22 @@ function extractToolInput<T>(
   );
 }
 
+/**
+ * Max existing stems injected into the generator prompt to steer diversity.
+ * Keeps the diversity block under ~3 000 tokens even for large cells.
+ */
+const MAX_EXISTING_STEMS = 20;
+
 export interface GeneratorContext {
   ts: typeof schema.taskStatements.$inferSelect;
   scenario: typeof schema.scenarios.$inferSelect | null;
   seedQuestions: typeof schema.questions.$inferSelect[];
+  /** Stems of active questions already in this (task_statement, bloom_level) cell. */
+  existingStems: string[];
 }
 
 export function loadGeneratorContext(
-  params: { taskStatementId: string; scenarioId?: string },
+  params: { taskStatementId: string; scenarioId?: string; bloomLevel?: BloomLevel },
   db: Db,
 ): GeneratorContext {
   const ts = db
@@ -193,7 +218,26 @@ export function loadGeneratorContext(
         )
         .all();
 
-  return { ts, scenario, seedQuestions };
+  // When bloomLevel is provided, fetch active stems for this cell so the
+  // generator can avoid repeating existing questions.
+  let existingStems: string[] = [];
+  if (params.bloomLevel) {
+    const rows = db
+      .select({ stem: schema.questions.stem })
+      .from(schema.questions)
+      .where(
+        and(
+          eq(schema.questions.taskStatementId, ts.id),
+          eq(schema.questions.bloomLevel, params.bloomLevel),
+          eq(schema.questions.status, "active"),
+        ),
+      )
+      .limit(MAX_EXISTING_STEMS)
+      .all();
+    existingStems = rows.map((r) => r.stem);
+  }
+
+  return { ts, scenario, seedQuestions, existingStems };
 }
 
 export function buildGeneratorSystemPrompt(
@@ -201,21 +245,62 @@ export function buildGeneratorSystemPrompt(
   bloomLevel: BloomLevel,
   retryLog: AttemptLogEntry[],
 ): string {
-  const { ts, scenario, seedQuestions } = ctx;
+  const { ts, scenario, seedQuestions, existingStems } = ctx;
   const promptPath = resolve(process.cwd(), "prompts/generator.md");
   const template = loadPromptFile(promptPath);
   return template.render({
     task_statement_id: ts.id,
     task_statement_title: ts.title,
     domain_id: ts.domainId,
-    knowledge_bullets: formatBullets(ts.knowledgeBullets),
-    skills_bullets: formatBullets(ts.skillsBullets),
+    knowledge_bullets_indexed: formatBulletsIndexed(ts.knowledgeBullets),
+    skills_bullets_indexed: formatBulletsIndexed(ts.skillsBullets),
     target_bloom_level: bloomLevel,
     target_bloom_verb: BLOOM_VERBS[bloomLevel] ?? String(bloomLevel),
     scenario_block: formatScenarioBlock(scenario),
     fewshot_block: formatFewshotBlock(seedQuestions),
+    existing_questions_block: formatExistingQuestionsBlock(existingStems),
     retry_feedback: formatRetryFeedback(retryLog),
   });
+}
+
+/**
+ * Phase 16 / E3 — validates a candidate's `knowledge_bullet_idxs` and
+ * `skills_bullet_idxs` against the parent task statement's bullet counts.
+ * Returns null when valid, or a violation entry the orchestrator can feed
+ * into `retryLog` so the next attempt sees the specific issue.
+ */
+export function validateBulletIdxs(
+  candidate: Pick<EmitQuestionInput, "knowledge_bullet_idxs" | "skills_bullet_idxs">,
+  ts: typeof schema.taskStatements.$inferSelect,
+): { code: "out_of_range" | "empty"; detail: string } | null {
+  const k = candidate.knowledge_bullet_idxs ?? [];
+  const s = candidate.skills_bullet_idxs ?? [];
+  if (k.length === 0 && s.length === 0) {
+    return {
+      code: "empty",
+      detail:
+        "no bullet citations — at least one of knowledge_bullet_idxs or skills_bullet_idxs must be non-empty",
+    };
+  }
+  const kMax = ts.knowledgeBullets.length;
+  const sMax = ts.skillsBullets.length;
+  for (const idx of k) {
+    if (idx < 0 || idx >= kMax) {
+      return {
+        code: "out_of_range",
+        detail: `knowledge_bullet_idxs contains ${idx} but task statement has only ${kMax} knowledge bullets (valid: 0..${kMax - 1})`,
+      };
+    }
+  }
+  for (const idx of s) {
+    if (idx < 0 || idx >= sMax) {
+      return {
+        code: "out_of_range",
+        detail: `skills_bullet_idxs contains ${idx} but task statement has only ${sMax} skills bullets (valid: 0..${sMax - 1})`,
+      };
+    }
+  }
+  return null;
 }
 
 export const GENERATOR_TOOL_PARAMS = {
@@ -351,6 +436,8 @@ export function persistApprovedQuestion(
       difficulty: candidate.difficulty,
       bloomLevel: candidate.bloom_level,
       bloomJustification: candidate.bloom_justification,
+      knowledgeBulletIdxs: candidate.knowledge_bullet_idxs ?? [],
+      skillsBulletIdxs: candidate.skills_bullet_idxs ?? [],
       source: "generated",
       status: "active",
     })
@@ -375,6 +462,7 @@ export async function generateOneQuestion(
     {
       taskStatementId: params.taskStatementId,
       scenarioId: params.scenarioId,
+      bloomLevel: params.bloomLevel,
     },
     db,
   );
@@ -383,6 +471,31 @@ export async function generateOneQuestion(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const candidate = await callGenerator(ctx, params.bloomLevel, log, db);
+
+    // Phase 16 / E3 — bullet-citation validation runs BEFORE the reviewer.
+    // Out-of-range indices are a structural violation we can detect locally
+    // (no Claude call) and feed back to the next attempt with a precise
+    // bullet-count message — cheaper and more actionable than letting the
+    // reviewer guess that the citations are wrong.
+    const bulletViolation = validateBulletIdxs(candidate, ctx.ts);
+    if (bulletViolation) {
+      log.push({
+        attempt,
+        verdict: "reject",
+        summary: `bullet citation invalid (${bulletViolation.code})`,
+        violations: [
+          {
+            // Reviewer's enum doesn't have a bullet-citation code; reuse
+            // `fabricated_content` since an out-of-range index implies the
+            // model invented a bullet that doesn't exist on the TS.
+            code: "fabricated_content",
+            detail: bulletViolation.detail,
+          },
+        ],
+      });
+      continue;
+    }
+
     const review = await callReviewer(ctx.ts, params.bloomLevel, candidate, db);
     log.push({
       attempt,

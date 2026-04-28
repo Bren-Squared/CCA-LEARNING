@@ -3,6 +3,8 @@ import { and, eq } from "drizzle-orm";
 import type { Db, DbClient } from "../db";
 import { schema } from "../db";
 import { readSettings } from "../settings";
+import { applyMcqAttempt } from "../study/mcq-srs";
+import { applyEloUpdate } from "./elo-update";
 import {
   type BloomLevel,
   computeLevelScore,
@@ -58,6 +60,33 @@ export function writeProgressEvent(
       { now: ts.getTime(), halfLifeDays },
       tx,
     );
+
+    // E2 / Phase 15 — every MCQ answer feeds the SM-2 scheduler so missed
+    // items return to the user as a re-test queue. Other event kinds don't
+    // touch SRS state. The question id lives on the event payload (set by
+    // `DrillSession`); silently skip when absent so non-drill writers
+    // (seed scripts, tutor signals carrying mcq_answer) don't fail.
+    if (input.kind === "mcq_answer") {
+      const questionId =
+        typeof payload.question_id === "string" ? payload.question_id : null;
+      if (questionId) {
+        applyMcqAttempt(
+          questionId,
+          input.success,
+          { now: ts.getTime() },
+          tx,
+        );
+        // Phase 17 / E4 — Glicko update for both sides in the same tx.
+        applyEloUpdate(
+          questionId,
+          input.taskStatementId,
+          input.bloomLevel,
+          input.success,
+          { now: ts.getTime() },
+          tx,
+        );
+      }
+    }
 
     return { eventId, score, itemCount };
   });

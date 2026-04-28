@@ -19,6 +19,7 @@ import {
   loadGeneratorContext,
   parseGeneratorMessage,
   persistApprovedQuestion,
+  validateBulletIdxs,
 } from "./generator";
 
 /**
@@ -136,11 +137,11 @@ function buildBatchRequest(
   db: Db,
   generatorModel: string,
 ): Anthropic.Messages.BatchCreateParams.Request {
+  const bloom = target.bloomLevel as BloomLevel;
   const ctx = loadGeneratorContext(
-    { taskStatementId: target.taskStatementId },
+    { taskStatementId: target.taskStatementId, bloomLevel: bloom },
     db,
   );
-  const bloom = target.bloomLevel as BloomLevel;
   const systemText = buildGeneratorSystemPrompt(ctx, bloom, []);
   return {
     custom_id: target.customId,
@@ -394,9 +395,17 @@ export async function processBulkJob(
 
     try {
       const ctx = loadGeneratorContext(
-        { taskStatementId: target.taskStatementId },
+        { taskStatementId: target.taskStatementId, bloomLevel: target.bloomLevel as BloomLevel },
         db,
       );
+      // Phase 16 / E3 — bullet-citation guard runs before the (cheap) reviewer
+      // call so a structurally invalid candidate is rejected without burning
+      // an extra Claude invocation.
+      const bulletViolation = validateBulletIdxs(candidate, ctx.ts);
+      if (bulletViolation) {
+        rejected += 1;
+        continue;
+      }
       const review = await callReviewer(
         ctx.ts,
         target.bloomLevel as BloomLevel,

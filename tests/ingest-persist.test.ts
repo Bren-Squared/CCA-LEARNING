@@ -84,4 +84,29 @@ describe("persistCurriculum (idempotency + coverage)", () => {
     expect(readIngestHash(handle.db)).toBe("def456");
     handle.close();
   });
+
+  it("countIngested.questions counts seed only, ignoring generated", () => {
+    // After Phase 6 bulk generation, the active bank grows far beyond 12.
+    // AT1's "12 seed questions" assertion must stay stable so that
+    // `npm run ingest --force` remains safe post-generation.
+    persistCurriculum(handle.db, curriculum, bloomStub);
+    handle.db.insert(schema.questions).values({
+      id: "generated-sample-1",
+      stem: "a generated question",
+      options: ["a", "b", "c", "d"],
+      correctIndex: 0,
+      explanations: ["e1", "e2", "e3", "e4"],
+      taskStatementId: "D1.1",
+      scenarioId: null,
+      difficulty: 3,
+      bloomLevel: 3,
+      bloomJustification: "generated stub",
+      source: "generated",
+      status: "active",
+    }).run();
+
+    const counts = countIngested(handle.db);
+    expect(counts.questions).toBe(12);
+    handle.close();
+  });
 });

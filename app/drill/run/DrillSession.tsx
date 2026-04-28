@@ -14,6 +14,8 @@ interface AnswerRecord {
 
 type Phase = "answering" | "reviewing" | "done";
 
+const OPTION_LETTERS: readonly string[] = ["A", "B", "C", "D", "E", "F"];
+
 export default function DrillSession({
   questions,
   scopeLabel,
@@ -31,7 +33,6 @@ export default function DrillSession({
 
   const current = questions[index];
   const total = questions.length;
-  const optionLetters = ["A", "B", "C", "D", "E", "F"];
 
   const submit = useCallback(async () => {
     if (phase !== "answering" || selected === null || !current) return;
@@ -135,7 +136,7 @@ export default function DrillSession({
       }
       if (phase === "answering" && current) {
         const upper = e.key.toUpperCase();
-        const letterIdx = optionLetters.indexOf(upper);
+        const letterIdx = OPTION_LETTERS.indexOf(upper);
         if (letterIdx >= 0 && letterIdx < current.options.length) {
           e.preventDefault();
           setSelected(letterIdx);
@@ -283,7 +284,7 @@ export default function DrillSession({
               />
               <span>
                 <span className="font-mono text-xs text-zinc-500">
-                  {optionLetters[i]}.
+                  {OPTION_LETTERS[i]}.
                 </span>{" "}
                 {opt}
               </span>
@@ -344,7 +345,7 @@ export default function DrillSession({
           ) : null}
         </div>
         <p className="text-xs text-zinc-500">
-          Keys: A–{optionLetters[current.options.length - 1]} select · Enter{" "}
+          Keys: A–{OPTION_LETTERS[current.options.length - 1]} select · Enter{" "}
           {phase === "answering" ? "submit" : "next"} · Esc end
         </p>
       </div>

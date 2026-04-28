@@ -1,18 +1,21 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, lte } from "drizzle-orm";
 import type { Db } from "../db";
 import { getAppDb, schema } from "../db";
+import { predictedAccuracy } from "../progress/elo";
 import type { BloomLevel } from "../progress/mastery";
 
 /**
  * Drill scope. `type: "all"` pulls from every active question in the bank.
  * `type: "domain"` walks the task_statements → questions chain; `task` is a
- * single TS; `scenario` filters by questions.scenario_id.
+ * single TS; `scenario` filters by questions.scenario_id; `due-mcq` (E2/AT21)
+ * pulls items whose SRS state has them due for re-test.
  */
 export type DrillScope =
   | { type: "all" }
   | { type: "domain"; id: string }
   | { type: "task"; id: string }
-  | { type: "scenario"; id: string };
+  | { type: "scenario"; id: string }
+  | { type: "due-mcq" };
 
 export interface DrillQuestion {
   id: string;
@@ -25,6 +28,9 @@ export interface DrillQuestion {
   domainId: string;
   bloomLevel: number;
   source: "seed" | "generated";
+  /** Phase 17 / E4 — current Glicko rating; 1500 prior on cold rows. */
+  eloRating?: number;
+  attemptsCount?: number;
 }
 
 export interface DrillPool {
@@ -35,6 +41,14 @@ export interface DrillPool {
 }
 
 export const DEFAULT_DRILL_LIMIT = 10;
+
+/**
+ * Phase 17 / E4 — minimum attempts on a question before its Elo rating is
+ * trusted as a difficulty signal. Below this floor the rating is dominated
+ * by the 1500 prior, so the targetSuccessRate weighting falls back to the
+ * legacy seed shuffle to avoid biasing on noise.
+ */
+export const ELO_MIN_ATTEMPTS = 5;
 
 /**
  * Deterministic xorshift32 PRNG. Seeded shuffle is useful for reproducible
@@ -66,7 +80,7 @@ function filterTaskStatementIds(scope: DrillScope, db: Db): string[] | null {
       .all()
       .map((r) => r.id);
   }
-  // scenario: no TS filter — scenario filter applied directly to questions
+  // scenario / due-mcq: no TS filter — scope is applied separately
   return null;
 }
 
@@ -75,6 +89,11 @@ function filterTaskStatementIds(scope: DrillScope, db: Db): string[] | null {
  * them deterministically by seed, caps at `limit`. `availableCount` reports
  * the pre-cap total so the UI can surface "need more questions" when the
  * bank is under-filled. No Claude calls — this is strictly a DB read.
+ *
+ * `due-mcq` scope is special-cased: it joins `mcq_review_state`, filters to
+ * items due at-or-before `now`, and orders by `due_at ASC` (most overdue
+ * first) — not seed-shuffled, because the SRS scheduler already imposes a
+ * meaningful order.
  */
 export function buildDrillPool(
   scope: DrillScope,
@@ -83,11 +102,24 @@ export function buildDrillPool(
     limit?: number;
     seed?: number;
     bloomLevel?: BloomLevel;
+    /** Override `now` (ms) for `due-mcq` scope; defaults to `Date.now()`. */
+    now?: number;
+    /**
+     * Phase 17 / E4 — when set, weights candidate questions toward the user's
+     * current cell rating so predicted accuracy ≈ this target (the "desirable
+     * difficulty" zone, typically ~0.7). Falls back to seed-shuffle for
+     * questions with `attempts_count < ELO_MIN_ATTEMPTS`.
+     */
+    targetSuccessRate?: number;
   } = {},
 ): DrillPool {
   const db = opts.db ?? getAppDb();
   const limit = opts.limit ?? DEFAULT_DRILL_LIMIT;
   const seed = opts.seed ?? Math.floor(Math.random() * 0x7fffffff);
+
+  if (scope.type === "due-mcq") {
+    return buildDueMcqDrillPool(db, limit, opts.now ?? Date.now(), opts.bloomLevel);
+  }
 
   const tsIds = filterTaskStatementIds(scope, db);
   const tsFilter =
@@ -119,6 +151,8 @@ export function buildDrillPool(
       taskStatementId: schema.questions.taskStatementId,
       bloomLevel: schema.questions.bloomLevel,
       source: schema.questions.source,
+      eloRating: schema.questions.eloRating,
+      attemptsCount: schema.questions.attemptsCount,
     })
     .from(schema.questions)
     .where(filters.length === 1 ? filters[0] : and(...filters))
@@ -148,14 +182,171 @@ export function buildDrillPool(
       domainId: ts?.domainId ?? "",
       bloomLevel: r.bloomLevel,
       source: r.source,
+      eloRating: r.eloRating,
+      attemptsCount: r.attemptsCount,
     };
   });
+
+  // Phase 17 / E4 — desirable-difficulty weighting. When the caller asks for
+  // a target success rate (typical exam-prep value ≈ 0.7), we score each
+  // calibrated question by closeness to the user's predicted accuracy on it,
+  // then sample by score. Cold questions (< ELO_MIN_ATTEMPTS) fall back to
+  // the legacy seed shuffle so we don't bias on a 1500-prior.
+  if (
+    opts.targetSuccessRate !== undefined &&
+    opts.targetSuccessRate >= 0 &&
+    opts.targetSuccessRate <= 1
+  ) {
+    const userRating = pickUserRating(db, scope, opts.bloomLevel);
+    const ranked = rankByDesirableDifficulty(
+      questions,
+      userRating,
+      opts.targetSuccessRate,
+      seed,
+    );
+    return {
+      questions: ranked.slice(0, limit),
+      availableCount: ranked.length,
+      scope,
+    };
+  }
 
   const shuffled = seededShuffle(questions, seed);
   return {
     questions: shuffled.slice(0, limit),
     availableCount: shuffled.length,
     scope,
+  };
+}
+
+/**
+ * Pull the user's mean Elo rating across the cells matching the drill scope.
+ * Returns the default 1500 prior when nothing has been calibrated yet — the
+ * targetSuccessRate weighting still produces a sensible ordering against an
+ * uncalibrated user (cold questions land in the seed-shuffle fallback).
+ */
+function pickUserRating(
+  db: Db,
+  scope: DrillScope,
+  bloomLevel: BloomLevel | undefined,
+): number {
+  const rows = db.select().from(schema.userSkill).all();
+  if (rows.length === 0) return 1500;
+
+  let relevant = rows;
+  if (scope.type === "task") {
+    relevant = rows.filter((r) => r.taskStatementId === scope.id);
+  } else if (scope.type === "domain") {
+    const tsIds = db
+      .select({ id: schema.taskStatements.id })
+      .from(schema.taskStatements)
+      .where(eq(schema.taskStatements.domainId, scope.id))
+      .all()
+      .map((r) => r.id);
+    const set = new Set(tsIds);
+    relevant = rows.filter((r) => set.has(r.taskStatementId));
+  }
+  if (bloomLevel !== undefined) {
+    relevant = relevant.filter((r) => r.bloomLevel === bloomLevel);
+  }
+  if (relevant.length === 0) return 1500;
+  const total = relevant.reduce((s, r) => s + r.eloRating * r.attemptsCount, 0);
+  const weight = relevant.reduce((s, r) => s + r.attemptsCount, 0);
+  return weight > 0 ? total / weight : 1500;
+}
+
+/**
+ * Rank questions by closeness of their predicted accuracy to the target,
+ * with cold (low-attempts) questions interleaved by seed shuffle. Stable
+ * ordering: closeness desc, then deterministic shuffle for ties / cold rows.
+ */
+function rankByDesirableDifficulty(
+  questions: DrillQuestion[],
+  userRating: number,
+  target: number,
+  seed: number,
+): DrillQuestion[] {
+  const calibrated: Array<{ q: DrillQuestion; closeness: number }> = [];
+  const cold: DrillQuestion[] = [];
+  for (const q of questions) {
+    if ((q.attemptsCount ?? 0) >= ELO_MIN_ATTEMPTS) {
+      const predicted = predictedAccuracy(userRating, q.eloRating ?? 1500);
+      calibrated.push({ q, closeness: 1 - Math.abs(predicted - target) });
+    } else {
+      cold.push(q);
+    }
+  }
+  calibrated.sort((a, b) => b.closeness - a.closeness);
+  const shuffledCold = seededShuffle(cold, seed);
+  return [...calibrated.map((c) => c.q), ...shuffledCold];
+}
+
+function buildDueMcqDrillPool(
+  db: Db,
+  limit: number,
+  nowMs: number,
+  bloomLevel: BloomLevel | undefined,
+): DrillPool {
+  const tsRows = db
+    .select({
+      id: schema.taskStatements.id,
+      title: schema.taskStatements.title,
+      domainId: schema.taskStatements.domainId,
+    })
+    .from(schema.taskStatements)
+    .all();
+  const tsMap = new Map(tsRows.map((t) => [t.id, t]));
+  const nowDate = new Date(nowMs);
+
+  const filters = [
+    lte(schema.mcqReviewState.dueAt, nowDate),
+    eq(schema.questions.status, "active"),
+  ];
+  if (bloomLevel !== undefined) {
+    filters.push(eq(schema.questions.bloomLevel, bloomLevel));
+  }
+
+  const rows = db
+    .select({
+      id: schema.questions.id,
+      stem: schema.questions.stem,
+      options: schema.questions.options,
+      correctIndex: schema.questions.correctIndex,
+      explanations: schema.questions.explanations,
+      taskStatementId: schema.questions.taskStatementId,
+      bloomLevel: schema.questions.bloomLevel,
+      source: schema.questions.source,
+      dueAt: schema.mcqReviewState.dueAt,
+    })
+    .from(schema.mcqReviewState)
+    .innerJoin(
+      schema.questions,
+      eq(schema.questions.id, schema.mcqReviewState.questionId),
+    )
+    .where(and(...filters))
+    .orderBy(asc(schema.mcqReviewState.dueAt))
+    .all();
+
+  const questions: DrillQuestion[] = rows.map((r) => {
+    const ts = tsMap.get(r.taskStatementId);
+    return {
+      id: r.id,
+      stem: r.stem,
+      options: r.options,
+      correctIndex: r.correctIndex,
+      explanations: r.explanations,
+      taskStatementId: r.taskStatementId,
+      taskStatementTitle: ts?.title ?? r.taskStatementId,
+      domainId: ts?.domainId ?? "",
+      bloomLevel: r.bloomLevel,
+      source: r.source,
+    };
+  });
+
+  return {
+    questions: questions.slice(0, limit),
+    availableCount: questions.length,
+    scope: { type: "due-mcq" },
   };
 }
 

@@ -7,6 +7,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "../lib/db";
 import { schema } from "../lib/db";
 import {
+  CACHE_HIT_MIN_SAMPLE,
+  CACHE_HIT_WARN_THRESHOLD,
   SESSION_GAP_MS,
   SOFT_WARN_RATIO,
   computeSpendSummary,
@@ -225,6 +227,159 @@ describe("computeSpendSummary", () => {
 
   it("SESSION_GAP_MS constant is 30 minutes", () => {
     expect(SESSION_GAP_MS).toBe(30 * 60_000);
+  });
+});
+
+describe("computeSpendSummary · cache stats (E1 / AT20)", () => {
+  let handle: ReturnType<typeof freshDb>;
+  beforeEach(() => {
+    handle = freshDb();
+    handle.db.insert(schema.settings).values({ id: 1 }).run();
+  });
+
+  it("returns empty cacheStats when nothing has been logged", () => {
+    const s = computeSpendSummary(handle.db, new Date("2026-04-14T12:00:00Z"));
+    expect(s.cacheStats).toEqual([]);
+    handle.close();
+  });
+
+  it("computes hit rate as cache_read / (cache_read + cache_creation)", () => {
+    const now = new Date("2026-04-14T12:00:00Z");
+    // First tutor call seeds the cache (creation only).
+    logCall(handle.db, new Date("2026-04-10T10:00:00Z"), {
+      role: "tutor",
+      cacheCreationInputTokens: 1000,
+      cacheReadInputTokens: 0,
+    });
+    // Subsequent tutor calls hit the cache.
+    for (let i = 0; i < 4; i++) {
+      logCall(handle.db, new Date("2026-04-10T10:01:00Z"), {
+        role: "tutor",
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 1000,
+      });
+    }
+    const s = computeSpendSummary(handle.db, now);
+    const tutor = s.cacheStats.find((e) => e.role === "tutor");
+    expect(tutor).toBeDefined();
+    expect(tutor!.cacheCreationTokens).toBe(1000);
+    expect(tutor!.cacheReadTokens).toBe(4000);
+    // 4000 / (4000 + 1000) = 0.8
+    expect(tutor!.hitRate).toBeCloseTo(0.8, 5);
+    expect(tutor!.expectsCache).toBe(true);
+    handle.close();
+  });
+
+  it("warn fires only when expectsCache, sample ≥ CACHE_HIT_MIN_SAMPLE, and hitRate < threshold", () => {
+    const now = new Date("2026-04-14T12:00:00Z");
+    // Below floor — every call is a creation, but only 5 calls. Should NOT warn.
+    for (let i = 0; i < 5; i++) {
+      logCall(handle.db, new Date("2026-04-10T10:00:00Z"), {
+        role: "tutor",
+        cacheCreationInputTokens: 1000,
+        cacheReadInputTokens: 0,
+      });
+    }
+    let s = computeSpendSummary(handle.db, now);
+    let tutor = s.cacheStats.find((e) => e.role === "tutor");
+    expect(tutor!.callCount).toBe(5);
+    expect(tutor!.hitRate).toBe(0);
+    expect(tutor!.warn).toBe(false);
+
+    // Cross the floor — now 10 calls, hit rate still 0%. Warn must fire.
+    for (let i = 0; i < 5; i++) {
+      logCall(handle.db, new Date("2026-04-10T10:00:00Z"), {
+        role: "tutor",
+        cacheCreationInputTokens: 1000,
+        cacheReadInputTokens: 0,
+      });
+    }
+    s = computeSpendSummary(handle.db, now);
+    tutor = s.cacheStats.find((e) => e.role === "tutor");
+    expect(tutor!.callCount).toBe(CACHE_HIT_MIN_SAMPLE);
+    expect(tutor!.warn).toBe(true);
+    handle.close();
+  });
+
+  it("never raises a warn for roles whose role definition is cacheSystem: false", () => {
+    const now = new Date("2026-04-14T12:00:00Z");
+    // 50 reviewer calls with zero cache reads — would warn if cache were
+    // expected, but the role policy is cacheSystem:false.
+    for (let i = 0; i < 50; i++) {
+      logCall(handle.db, new Date("2026-04-10T10:00:00Z"), {
+        role: "reviewer",
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        inputTokens: 500,
+      });
+    }
+    const s = computeSpendSummary(handle.db, now);
+    const reviewer = s.cacheStats.find((e) => e.role === "reviewer");
+    expect(reviewer!.expectsCache).toBe(false);
+    expect(reviewer!.warn).toBe(false);
+    handle.close();
+  });
+
+  it("orders cache-enabled roles before no-cache roles, then by callCount desc", () => {
+    const now = new Date("2026-04-14T12:00:00Z");
+    // Heavy reviewer activity (cacheSystem:false).
+    for (let i = 0; i < 30; i++) {
+      logCall(handle.db, new Date("2026-04-10T10:00:00Z"), {
+        role: "reviewer",
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+      });
+    }
+    // Light explainer activity (cacheSystem:true).
+    for (let i = 0; i < 3; i++) {
+      logCall(handle.db, new Date("2026-04-10T10:01:00Z"), {
+        role: "explainer",
+        cacheCreationInputTokens: 100,
+        cacheReadInputTokens: 0,
+      });
+    }
+    const s = computeSpendSummary(handle.db, now);
+    expect(s.cacheStats.map((e) => e.role)).toEqual([
+      "explainer", // cache-enabled comes first regardless of volume
+      "reviewer",
+    ]);
+    handle.close();
+  });
+
+  it("hitRate is 0 (not NaN) when both numerator and denominator are zero", () => {
+    const now = new Date("2026-04-14T12:00:00Z");
+    logCall(handle.db, new Date("2026-04-10T10:00:00Z"), {
+      role: "grader",
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+    });
+    const s = computeSpendSummary(handle.db, now);
+    const grader = s.cacheStats.find((e) => e.role === "grader");
+    expect(grader!.hitRate).toBe(0);
+    expect(Number.isNaN(grader!.hitRate)).toBe(false);
+    handle.close();
+  });
+
+  it("savedCostUsd reflects the 0.9× discount on cache reads against the model rate card", () => {
+    const now = new Date("2026-04-14T12:00:00Z");
+    // claude-sonnet-4-6 input price is $3/MTok; one million cache reads should
+    // save 1_000_000 × ($3/MTok) × 0.9 = $2.70.
+    logCall(handle.db, new Date("2026-04-10T10:00:00Z"), {
+      role: "tutor",
+      model: "claude-sonnet-4-6",
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 1_000_000,
+    });
+    const s = computeSpendSummary(handle.db, now);
+    const tutor = s.cacheStats.find((e) => e.role === "tutor");
+    expect(tutor!.savedCostUsd).toBeCloseTo(2.7, 5);
+    expect(tutor!.savedInputTokenEquivalents).toBe(900_000);
+    handle.close();
+  });
+
+  it("CACHE_HIT_WARN_THRESHOLD constants are reasonable defaults", () => {
+    expect(CACHE_HIT_WARN_THRESHOLD).toBe(0.5);
+    expect(CACHE_HIT_MIN_SAMPLE).toBe(10);
   });
 });
 

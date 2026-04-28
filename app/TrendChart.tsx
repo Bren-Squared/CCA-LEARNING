@@ -78,7 +78,7 @@ export default function TrendChart({
           className="h-56 w-full min-w-[480px]"
           preserveAspectRatio="none"
         >
-          <title>Mastery trend over {series.days} days</title>
+          <title>{`Mastery trend over ${series.days} days`}</title>
           {/* Gridlines */}
           {[0, 25, 50, 75, 100].map((v) => (
             <g key={v}>

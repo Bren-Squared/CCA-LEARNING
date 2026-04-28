@@ -76,6 +76,23 @@ export const questions = sqliteTable("questions", {
   difficulty: integer("difficulty").notNull(),
   bloomLevel: integer("bloom_level").notNull(),
   bloomJustification: text("bloom_justification").notNull(),
+  /**
+   * Phase 16 / E3 — indices into the parent task statement's
+   * `knowledge_bullets[]` array that this question tests. Empty for legacy
+   * rows until backfilled. JSON-stored array of non-negative integers.
+   */
+  knowledgeBulletIdxs: text("knowledge_bullet_idxs", { mode: "json" })
+    .$type<number[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  skillsBulletIdxs: text("skills_bullet_idxs", { mode: "json" })
+    .$type<number[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  /** Phase 17 / E4 — Glicko-1 rating maintained by real attempt outcomes. */
+  eloRating: real("elo_rating").notNull().default(1500),
+  eloVolatility: real("elo_volatility").notNull().default(350),
+  attemptsCount: integer("attempts_count").notNull().default(0),
   source: text("source", { enum: ["seed", "generated"] }).notNull(),
   status: text("status", { enum: ["active", "flagged", "retired"] })
     .notNull()
@@ -283,6 +300,46 @@ export const tutorSessions = sqliteTable("tutor_sessions", {
 });
 
 // ---------------------------------------------------------------------------
+// User skill (E4 / Phase 17 — Elo posterior per (task_statement, bloom_level))
+// ---------------------------------------------------------------------------
+
+export const userSkill = sqliteTable(
+  "user_skill",
+  {
+    taskStatementId: text("task_statement_id")
+      .notNull()
+      .references(() => taskStatements.id, { onDelete: "cascade" }),
+    bloomLevel: integer("bloom_level").notNull(),
+    eloRating: real("elo_rating").notNull().default(1500),
+    eloVolatility: real("elo_volatility").notNull().default(350),
+    attemptsCount: integer("attempts_count").notNull().default(0),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.taskStatementId, t.bloomLevel] })],
+);
+
+// ---------------------------------------------------------------------------
+// MCQ review SRS (E2 / Phase 15 — re-test scheduler for missed MCQs)
+// ---------------------------------------------------------------------------
+
+export const mcqReviewState = sqliteTable(
+  "mcq_review_state",
+  {
+    questionId: text("question_id")
+      .primaryKey()
+      .references(() => questions.id, { onDelete: "cascade" }),
+    easeFactor: real("ease_factor").notNull().default(2.5),
+    intervalDays: real("interval_days").notNull().default(0),
+    dueAt: integer("due_at", { mode: "timestamp_ms" }).notNull(),
+    /** Quality 0..5 from the most recent review (SM-2 mapping). */
+    lastGrade: integer("last_grade").notNull(),
+    reviewsCount: integer("reviews_count").notNull().default(0),
+    lastReviewedAt: integer("last_reviewed_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [index("mcq_review_state_due_at_idx").on(t.dueAt)],
+);
+
+// ---------------------------------------------------------------------------
 // Bulk question generation jobs (FR3 / D4.5 — Anthropic Batches path)
 // ---------------------------------------------------------------------------
 
@@ -395,6 +452,10 @@ export type ClaudeCallLog = typeof claudeCallLog.$inferSelect;
 export type NewClaudeCallLog = typeof claudeCallLog.$inferInsert;
 export type BulkGenJob = typeof bulkGenJobs.$inferSelect;
 export type NewBulkGenJob = typeof bulkGenJobs.$inferInsert;
+export type McqReviewState = typeof mcqReviewState.$inferSelect;
+export type NewMcqReviewState = typeof mcqReviewState.$inferInsert;
+export type UserSkill = typeof userSkill.$inferSelect;
+export type NewUserSkill = typeof userSkill.$inferInsert;
 export type ScenarioPrompt = typeof scenarioPrompts.$inferSelect;
 export type NewScenarioPrompt = typeof scenarioPrompts.$inferInsert;
 export type ScenarioAttempt = typeof scenarioAttempts.$inferSelect;

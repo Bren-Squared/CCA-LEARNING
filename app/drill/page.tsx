@@ -2,6 +2,7 @@ import { asc } from "drizzle-orm";
 import Link from "next/link";
 import { getAppDb, schema } from "@/lib/db";
 import { countQuestionsByScope, DEFAULT_DRILL_LIMIT } from "@/lib/study/drill";
+import { countDueMcqs } from "@/lib/study/mcq-srs";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,7 @@ function shortageNote(count: number): string | null {
 export default async function DrillLauncherPage() {
   const db = getAppDb();
   const counts = countQuestionsByScope(db);
+  const dueMcqCount = countDueMcqs({ db });
   const domains = db
     .select()
     .from(schema.domains)
@@ -59,6 +61,32 @@ export default async function DrillLauncherPage() {
             event at the question&apos;s Bloom level.
           </p>
         </header>
+
+        {dueMcqCount > 0 ? (
+          <section className="flex flex-col gap-3 rounded-xl border border-indigo-300 bg-indigo-50/50 p-6 dark:border-indigo-900 dark:bg-indigo-950/20">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="text-lg font-semibold">
+                Due for re-test
+                <span className="ml-2 font-mono text-[10px] uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                  E2
+                </span>
+              </h2>
+              <span className="font-mono text-sm text-indigo-700 dark:text-indigo-300">
+                {dueMcqCount} due
+              </span>
+            </div>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+              MCQs you previously missed (or are scheduled to revisit by SM-2),
+              ordered most-overdue first.
+            </p>
+            <Link
+              href={runHref("due-mcq")}
+              className="self-start rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+            >
+              Start re-test
+            </Link>
+          </section>
+        ) : null}
 
         <section className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-6 dark:border-zinc-800">
           <h2 className="text-lg font-semibold">Everything</h2>

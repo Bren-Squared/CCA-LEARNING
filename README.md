@@ -78,6 +78,35 @@ Every Claude call is logged to `claude_call_log` with tokens, cost, stop_reason,
 
 The dashboard home page carries a banner when the soft warning is tripped, linking to `/settings` to raise the budget. Estimates are derived from the rate card in `lib/claude/tokens.ts`; they don't replace the Anthropic console invoice.
 
+### Reading the cache panel (E1, NFR4.3)
+
+The `/spend` page also renders a per-role **cache efficiency** panel. Each row shows hit rate (`cache_read / (cache_read + cache_creation)`), total tokens saved, and dollar savings against the model's rate card.
+
+- **Cache-enabled roles** are roles whose `RoleDefinition` declares `cacheSystem: true` (`tutor`, `generator`, `explainer`, `card-writer`, `rubric-drafter`). They should show a hit rate ≥ 50% after the first warm-up call within the cache TTL. An amber "low hit rate" pill appears when an enabled role drops below 50% over ≥ 10 calls — typically a sign that the system prompt is being inadvertently mutated per call.
+- **No-cache roles** (`reviewer`, `grader`, `deduplicator`) are listed under a separate subgroup. They never trigger the warning — caching is intentionally disabled because each call carries unique data in the system prompt.
+
+The single source of truth for which roles expect cache hits is `lib/claude/roles/cache-policy.ts`; if you add a new role, register it there.
+
+## MCP server (E5, Phase 18)
+
+A read-only MCP server exposes the curriculum SQLite to Claude Code sessions running in this repo. Two tools (`read_curriculum`, `read_progress`) and one resource template (`cca://task-statement/{id}`).
+
+To register the server with Claude Code, the `.mcp.json` at the repo root is detected automatically when CC starts in this directory. To verify:
+
+```bash
+# In the project root, with Claude Code installed:
+claude mcp list
+# cca-curriculum should appear with status "connected"
+```
+
+Sample queries you can run from a Claude Code session in this repo:
+
+- "What are the Knowledge bullets for D1.2?" → resolves via `read_curriculum`.
+- "What's my mastery on D3.4?" → resolves via `read_progress`.
+- "Show me task statement D2.1" → resolves via the `cca://task-statement/D2.1` resource.
+
+Read-only is enforced by the *absence* of write tools on the server surface — the database connection is shared with the app, and better-sqlite3 doesn't expose a per-query read-only mode through Drizzle. Stray Claude Code sessions cannot mutate user progress because no `write_*` tools are registered.
+
 ## Known limitations / approximations
 
 - **Scaled score** (100–1000, 720 pass) is a two-segment linear approximation (RD2). Anthropic doesn't publish the official raw-to-scaled formula; the app shows a banner on mock exam results.

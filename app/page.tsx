@@ -6,6 +6,7 @@ import { buildTrendSeries } from "@/lib/progress/trend";
 import { getSettingsStatus } from "@/lib/settings";
 import { countDueCards } from "@/lib/study/cards";
 import { countAllActiveQuestionsByCell } from "@/lib/study/drill";
+import { countDueMcqs } from "@/lib/study/mcq-srs";
 import { schema } from "@/lib/db";
 import { readBudgetStatus } from "@/lib/spend/summary";
 import BloomHeatmap from "./BloomHeatmap";
@@ -89,6 +90,7 @@ export default async function Home() {
   const budget = readBudgetStatus(db);
   const dueFlashcards = countDueCards({ db });
   const totalFlashcards = db.select({ id: schema.flashcards.id }).from(schema.flashcards).all().length;
+  const dueMcqs = countDueMcqs({ db });
   const readiness = computeReadiness(
     dashboard.domains.map((d) => ({
       summary: d.summary,
@@ -100,78 +102,9 @@ export default async function Home() {
     <main className="flex flex-1 flex-col items-center px-6 py-10">
       <div className="flex w-full max-w-5xl flex-col gap-8">
         <header className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight">
-              CCA Foundations
-            </h1>
-            <div className="flex items-baseline gap-4 text-sm">
-              <span className="text-green-700 dark:text-green-400">
-                {status.apiKeyRedacted} · {status.defaultModel}
-              </span>
-              <Link href="/drill" className="text-zinc-600 underline dark:text-zinc-400">
-                Drill
-              </Link>
-              <Link
-                href="/study/tutor"
-                className="text-zinc-600 underline dark:text-zinc-400"
-              >
-                Tutor
-              </Link>
-              <Link
-                href="/study/scenarios"
-                className="text-zinc-600 underline dark:text-zinc-400"
-              >
-                Scenarios
-              </Link>
-              <Link
-                href="/mock"
-                className="text-zinc-600 underline dark:text-zinc-400"
-              >
-                Mock Exam
-              </Link>
-              <Link
-                href="/study/exercises"
-                className="text-zinc-600 underline dark:text-zinc-400"
-              >
-                Exercises
-              </Link>
-              <Link
-                href="/study/flashcards"
-                className="text-zinc-600 underline dark:text-zinc-400"
-              >
-                Flashcards
-                {dueFlashcards > 0 ? (
-                  <span className="ml-1 rounded-full bg-indigo-600 px-1.5 py-0.5 font-mono text-[10px] text-white">
-                    {dueFlashcards}
-                  </span>
-                ) : null}
-              </Link>
-              <Link
-                href="/admin/coverage"
-                className="text-zinc-600 underline dark:text-zinc-400"
-              >
-                Coverage
-              </Link>
-              <Link
-                href="/spend"
-                className="text-zinc-600 underline dark:text-zinc-400"
-              >
-                Spend
-              </Link>
-              <Link
-                href="/shortcuts"
-                className="text-zinc-600 underline dark:text-zinc-400"
-              >
-                Shortcuts
-              </Link>
-              <Link
-                href="/settings"
-                className="text-zinc-600 underline dark:text-zinc-400"
-              >
-                Settings
-              </Link>
-            </div>
-          </div>
+          <h1 className="text-3xl font-semibold tracking-tight">
+            Dashboard
+          </h1>
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
             Readiness {pct(readiness)} · overall {pct(dashboard.totals.overallSummary)}{" "}
             · mastered {dashboard.totals.masteredCells}/{dashboard.totals.totalCells}{" "}
@@ -301,6 +234,7 @@ export default async function Home() {
         <section className="grid gap-5 md:grid-cols-2">
           <LastSession recap={dashboard.lastSession} />
           <FlashcardsCard due={dueFlashcards} total={totalFlashcards} />
+          <McqQueueCard due={dueMcqs} />
         </section>
 
         <section className="flex flex-col gap-4">
@@ -390,6 +324,41 @@ function LastSession({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function McqQueueCard({ due }: { due: number }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+      <h2 className="text-sm font-mono uppercase tracking-widest text-zinc-500">
+        MCQ review queue
+        <span className="ml-2 text-[10px] text-zinc-400">E2 / AT21</span>
+      </h2>
+      {due === 0 ? (
+        <p className="text-sm text-zinc-500">
+          Nothing due — answer some MCQs in{" "}
+          <Link href="/drill" className="underline">
+            Drill
+          </Link>{" "}
+          and items you miss return here on an SM-2 schedule.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            <span className="font-semibold text-indigo-700 dark:text-indigo-400">
+              {due} MCQ{due === 1 ? "" : "s"} due
+            </span>{" "}
+            for re-test
+          </p>
+          <Link
+            href="/drill/run?scope=due-mcq"
+            className="self-start rounded-full bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700"
+          >
+            Start re-test
+          </Link>
         </div>
       )}
     </div>

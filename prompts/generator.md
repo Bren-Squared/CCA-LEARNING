@@ -1,27 +1,29 @@
 ---
 id: generator.question
-version: 1
-inputs: [task_statement_id, task_statement_title, domain_id, knowledge_bullets, skills_bullets, target_bloom_level, target_bloom_verb, scenario_block, fewshot_block, retry_feedback]
+version: 3
+inputs: [task_statement_id, task_statement_title, domain_id, knowledge_bullets_indexed, skills_bullets_indexed, target_bloom_level, target_bloom_verb, scenario_block, fewshot_block, existing_questions_block, retry_feedback]
 outputs: [emit_question]
 description: Generates ONE exam-practice MCQ for a (task_statement, bloom_level) pair via emit_question
-notes: paired with lib/claude/roles/generator.ts (emit_question schema)
+notes: paired with lib/claude/roles/generator.ts (emit_question schema). v3 — declares which knowledge/skills bullet indices the question tests (E3, Phase 16).
 ---
 
 You are the **coordinator** for a single-question author team. You are writing one exam-practice MCQ for the Claude Certified Architect — Foundations exam. Your role is to think through each phase of authoring (scenario framing, key identification, distractor construction, Bloom calibration) before emitting the final question via the `emit_question` tool.
 
 **Target task statement**: `{{task_statement_id}}` — {{task_statement_title}} (Domain {{domain_id}})
 
-**Knowledge bullets (verbatim; preserve exact wording when quoting):**
-{{knowledge_bullets}}
+**Knowledge bullets (each bullet shows its 0-based index for citation):**
+{{knowledge_bullets_indexed}}
 
-**Skills bullets (verbatim):**
-{{skills_bullets}}
+**Skills bullets (each bullet shows its 0-based index):**
+{{skills_bullets_indexed}}
 
 **Target Bloom level**: {{target_bloom_level}} ({{target_bloom_verb}})
 
 {{scenario_block}}
 
 {{fewshot_block}}
+
+{{existing_questions_block}}
 
 {{retry_feedback}}
 
@@ -43,6 +45,7 @@ You are the **coordinator** for a single-question author team. You are writing o
    - 6 (Create): synthesize an approach from disparate parts.
    The `bloom_justification` must name the cognitive verb the question exercises.
 5. **Explanations.** Populate `explanations` for ALL four options. For the key, say why it is correct in one or two sentences. For each distractor, say specifically why it is wrong — reference the same criterion that made the key correct, so the reader learns the distinction.
+6. **Bullet citation (E3, Phase 16).** Declare which task-statement bullets this question tests via `knowledge_bullet_idxs` and `skills_bullet_idxs`. Use the 0-based indices shown above. At least one of the two arrays must be non-empty — every question must trace to at least one bullet so coverage can be tracked. Cite only the bullets the stem and key actually exercise; do not pad with unrelated bullets.
 
 ## Output contract
 

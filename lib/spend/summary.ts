@@ -1,6 +1,8 @@
 import { asc, desc, gte, sql } from "drizzle-orm";
 import type { Db } from "../db";
 import { getAppDb, schema } from "../db";
+import { roleExpectsCache } from "../claude/roles/cache-policy";
+import { MODEL_PRICES } from "../claude/pricing";
 import { readSettings } from "../settings";
 
 /**
@@ -19,6 +21,19 @@ import { readSettings } from "../settings";
 
 export const SESSION_GAP_MS = 30 * 60_000;
 export const SOFT_WARN_RATIO = 0.8;
+
+/**
+ * Per-role cache hit-rate threshold below which the spend panel raises an
+ * amber pill (only for roles whose definition declared `cacheSystem: true`).
+ * The bar is a fraction in [0, 1].
+ */
+export const CACHE_HIT_WARN_THRESHOLD = 0.5;
+/**
+ * Minimum number of calls before a cache-enabled role's hit rate is
+ * considered statistically meaningful enough to raise a warning. Below this
+ * floor we render the row but suppress the warning pill.
+ */
+export const CACHE_HIT_MIN_SAMPLE = 10;
 
 export interface SpendBreakdownEntry {
   key: string;
@@ -49,6 +64,7 @@ export interface SpendSummary {
   budgetMonthUsd: number;
   budgetUsedRatio: number;
   softWarning: boolean;
+  cacheStats: CacheStatsEntry[];
   recentCalls: Array<{
     id: string;
     ts: Date;
@@ -60,6 +76,47 @@ export interface SpendSummary {
     stopReason: string | null;
     durationMs: number;
   }>;
+}
+
+export interface CacheStatsEntry {
+  /** Role name, exactly as it appears in `claude_call_log.role`. */
+  role: string;
+  /** Whether the role's RoleDefinition declared `cacheSystem: true`. */
+  expectsCache: boolean;
+  /** Total month-to-date calls for this role (numerator + denominator combined). */
+  callCount: number;
+  /** Sum of `cache_creation_input_tokens` across the month. */
+  cacheCreationTokens: number;
+  /** Sum of `cache_read_input_tokens` across the month. */
+  cacheReadTokens: number;
+  /**
+   * Cacheable hit rate in [0, 1]: `cacheRead / (cacheRead + cacheCreation)`.
+   * Returns 0 when both are zero — that's the cold-state, not a divide-by-zero.
+   * NOTE: the denominator excludes uncached input tokens on purpose. This is
+   * the "of the cacheable prefix, how often did we hit?" question, which is
+   * the direct test of NFR4.3. A separate `tokensSavedRatio` metric (against
+   * the full input pool) is exposed too, for the cost-savings framing.
+   */
+  hitRate: number;
+  /**
+   * Equivalent uncached input tokens saved by cache reads. A token read from
+   * cache costs 0.1× the standard input rate, so each cache_read token "saves"
+   * 0.9× a normal input token. This is the dollar-savings basis.
+   */
+  savedInputTokenEquivalents: number;
+  /**
+   * Estimated USD saved by cache reads, computed per-call against the model's
+   * actual input price. Approximate (matches the rate card in
+   * `lib/claude/pricing.ts`); exact pricing lives on the Anthropic invoice.
+   */
+  savedCostUsd: number;
+  /**
+   * True when the role expected to hit the cache (`expectsCache=true`),
+   * accumulated at least `CACHE_HIT_MIN_SAMPLE` calls, and the observed hit
+   * rate is below `CACHE_HIT_WARN_THRESHOLD`. Drives the amber pill on the
+   * spend page.
+   */
+  warn: boolean;
 }
 
 function monthStartOf(now: Date): Date {
@@ -91,6 +148,89 @@ function sortByCostDesc(entries: SpendBreakdownEntry[]): SpendBreakdownEntry[] {
   return [...entries].sort((a, b) => b.costUsd - a.costUsd);
 }
 
+/**
+ * Per-call cache savings: a cache_read token costs 0.1× the standard input
+ * price, so its dollar savings vs. an uncached input token is 0.9× the
+ * input-price line item for that model. Unknown models contribute $0 (matches
+ * `estimateCostUsd`'s policy — we never crash on a model we don't know).
+ */
+function cacheSavingsForRow(
+  row: typeof schema.claudeCallLog.$inferSelect,
+): number {
+  const price = MODEL_PRICES[row.model];
+  if (!price) return 0;
+  const inputPricePerToken = price.inUsd / 1_000_000;
+  return row.cacheReadInputTokens * inputPricePerToken * 0.9;
+}
+
+function accumulateCacheRow(
+  map: Map<
+    string,
+    {
+      callCount: number;
+      cacheCreationTokens: number;
+      cacheReadTokens: number;
+      savedCostUsd: number;
+    }
+  >,
+  row: typeof schema.claudeCallLog.$inferSelect,
+): void {
+  const prev = map.get(row.role) ?? {
+    callCount: 0,
+    cacheCreationTokens: 0,
+    cacheReadTokens: 0,
+    savedCostUsd: 0,
+  };
+  prev.callCount += 1;
+  prev.cacheCreationTokens += row.cacheCreationInputTokens;
+  prev.cacheReadTokens += row.cacheReadInputTokens;
+  prev.savedCostUsd += cacheSavingsForRow(row);
+  map.set(row.role, prev);
+}
+
+/**
+ * Build the `CacheStatsEntry[]` for the spend page. Sorting puts cache-enabled
+ * roles first (so the warning rows are easy to spot), then orders by call count
+ * desc within each group — high-volume roles are where caching matters most.
+ */
+function buildCacheStats(
+  cacheByRole: Map<
+    string,
+    {
+      callCount: number;
+      cacheCreationTokens: number;
+      cacheReadTokens: number;
+      savedCostUsd: number;
+    }
+  >,
+): CacheStatsEntry[] {
+  const entries: CacheStatsEntry[] = [];
+  for (const [role, agg] of cacheByRole) {
+    const expectsCache = roleExpectsCache(role);
+    const denom = agg.cacheReadTokens + agg.cacheCreationTokens;
+    const hitRate = denom > 0 ? agg.cacheReadTokens / denom : 0;
+    const warn =
+      expectsCache &&
+      agg.callCount >= CACHE_HIT_MIN_SAMPLE &&
+      hitRate < CACHE_HIT_WARN_THRESHOLD;
+    entries.push({
+      role,
+      expectsCache,
+      callCount: agg.callCount,
+      cacheCreationTokens: agg.cacheCreationTokens,
+      cacheReadTokens: agg.cacheReadTokens,
+      hitRate,
+      savedInputTokenEquivalents: Math.round(agg.cacheReadTokens * 0.9),
+      savedCostUsd: agg.savedCostUsd,
+      warn,
+    });
+  }
+  return entries.sort((a, b) => {
+    if (a.expectsCache !== b.expectsCache) return a.expectsCache ? -1 : 1;
+    return b.callCount - a.callCount;
+  });
+}
+
 export function computeSpendSummary(
   db: Db = getAppDb(),
   now: Date = new Date(),
@@ -119,6 +259,15 @@ export function computeSpendSummary(
   };
   const byRole = new Map<string, SpendBreakdownEntry>();
   const byModel = new Map<string, SpendBreakdownEntry>();
+  const cacheByRole = new Map<
+    string,
+    {
+      callCount: number;
+      cacheCreationTokens: number;
+      cacheReadTokens: number;
+      savedCostUsd: number;
+    }
+  >();
   for (const row of mtdRows) {
     mtd.costUsd += row.estimatedCostUsd;
     mtd.callCount += 1;
@@ -130,6 +279,7 @@ export function computeSpendSummary(
     mtd.endedAt = row.ts;
     addToBreakdown(byRole, row.role, row);
     addToBreakdown(byModel, row.model, row);
+    accumulateCacheRow(cacheByRole, row);
   }
 
   // Current session — walk backwards, stop the first time we hit a gap greater
@@ -195,6 +345,7 @@ export function computeSpendSummary(
     budgetMonthUsd: budget,
     budgetUsedRatio,
     softWarning: budgetUsedRatio >= SOFT_WARN_RATIO,
+    cacheStats: buildCacheStats(cacheByRole),
     recentCalls: recentRows.map((r) => ({
       id: r.id,
       ts: r.ts,

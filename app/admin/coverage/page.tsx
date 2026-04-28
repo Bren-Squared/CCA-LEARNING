@@ -1,5 +1,4 @@
 import { asc } from "drizzle-orm";
-import Link from "next/link";
 import { getAppDb, schema } from "@/lib/db";
 import { hasApiKey, readSettings } from "@/lib/settings";
 import {
@@ -11,6 +10,7 @@ import {
 import { listBulkJobs } from "@/lib/study/bulk-gen";
 import BulkSection from "./BulkSection";
 import CoverageFillForm from "./CoverageFillForm";
+import DedupSection from "./DedupSection";
 
 export const dynamic = "force-dynamic";
 
@@ -85,6 +85,18 @@ export default async function CoveragePage() {
             value={report.totals.gapQuestions}
             accent={report.totals.gapQuestions > 0 ? "amber" : "green"}
           />
+          <Stat
+            label="Bullet blind spots"
+            value={report.totals.bulletBlindSpotCount}
+            accent={report.totals.bulletBlindSpotCount > 0 ? "amber" : "green"}
+          />
+          <Stat
+            label="Missing citations"
+            value={report.totals.questionsMissingBulletCitations}
+            accent={
+              report.totals.questionsMissingBulletCitations > 0 ? "amber" : "green"
+            }
+          />
         </section>
 
         <CoverageFillForm
@@ -98,6 +110,10 @@ export default async function CoveragePage() {
           jobs={bulkJobs}
           ceilingUsd={settings.bulkCostCeilingUsd}
         />
+
+        <DedupSection apiKeyConfigured={keyConfigured} />
+
+        <BulletBlindSpotsSection report={report} />
 
         <section className="flex flex-col gap-6">
           {domains.map((d) => {
@@ -161,11 +177,6 @@ export default async function CoveragePage() {
           })}
         </section>
 
-        <nav className="text-sm">
-          <Link href="/" className="text-zinc-600 underline dark:text-zinc-400">
-            ← Home
-          </Link>
-        </nav>
       </div>
     </main>
   );
@@ -191,6 +202,89 @@ function Stat({
       <span className="text-xs text-zinc-500">{label}</span>
       <span className={`text-lg font-semibold ${color}`}>{value}</span>
     </div>
+  );
+}
+
+function BulletBlindSpotsSection({
+  report,
+}: {
+  report: ReturnType<typeof buildCoverageReport>;
+}) {
+  const blind = report.bulletBlindSpots;
+  const grouped = new Map<
+    string,
+    { tsId: string; tsTitle: string; rows: typeof blind }
+  >();
+  for (const row of blind) {
+    const key = row.taskStatementId;
+    const prev = grouped.get(key) ?? {
+      tsId: row.taskStatementId,
+      tsTitle: row.taskStatementTitle,
+      rows: [],
+    };
+    prev.rows.push(row);
+    grouped.set(key, prev);
+  }
+  return (
+    <section className="flex flex-col gap-4 rounded-xl border border-zinc-200 p-5 dark:border-zinc-800">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-sm font-mono uppercase tracking-widest text-zinc-500">
+          Bullet blind spots · E3 / AT22
+        </h2>
+        <span className="font-mono text-xs text-zinc-500">
+          {blind.length} of {report.bulletCoverage.length} bullets uncovered
+          {report.totals.questionsMissingBulletCitations > 0 ? (
+            <>
+              {" "}
+              · {report.totals.questionsMissingBulletCitations} questions need
+              backfill
+            </>
+          ) : null}
+        </span>
+      </div>
+      {report.totals.questionsMissingBulletCitations > 0 ? (
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          {report.totals.questionsMissingBulletCitations} active question
+          {report.totals.questionsMissingBulletCitations === 1 ? "" : "s"} have
+          no bullet citations yet (legacy data from before E3). Run{" "}
+          <code className="font-mono">
+            npx tsx scripts/backfill-bullet-coverage.ts
+          </code>{" "}
+          to classify them with the cheap model. Until then, blind-spot counts
+          may overstate the true gap.
+        </p>
+      ) : null}
+      {blind.length === 0 ? (
+        <p className="text-sm text-zinc-500">
+          Every bullet has at least one active question citing it. ✓
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {Array.from(grouped.values()).map((group) => (
+            <div key={group.tsId} className="flex flex-col gap-2">
+              <h3 className="text-xs font-mono uppercase tracking-wider text-zinc-500">
+                {group.tsId} · {group.tsTitle}
+              </h3>
+              <ul className="flex flex-col gap-1">
+                {group.rows.map((row) => (
+                  <li
+                    key={`${row.taskStatementId}|${row.kind}|${row.bulletIdx}`}
+                    className="flex items-baseline gap-2 rounded-md border border-zinc-200 px-3 py-2 text-xs dark:border-zinc-800"
+                  >
+                    <span className="rounded-full bg-zinc-200 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                      {row.kind} [{row.bulletIdx}]
+                    </span>
+                    <span className="text-zinc-700 dark:text-zinc-300">
+                      {row.bulletText}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "cca-curriculum": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "scripts/mcp-curriculum.ts"]
+    }
+  }
+}

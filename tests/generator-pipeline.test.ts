@@ -75,6 +75,8 @@ function goodQuestion() {
     bloom_level: 2,
     bloom_justification: "Recognition of the SDK's stop_reason taxonomy.",
     difficulty: 2,
+    knowledge_bullet_idxs: [0],
+    skills_bullet_idxs: [],
   };
 }
 
@@ -291,6 +293,43 @@ describe("generateOneQuestion", () => {
     expect(systemPrompts[0]).not.toMatch(/Reviewer rejected your previous attempt/);
     expect(systemPrompts[1]).toMatch(/Reviewer rejected your previous attempt/);
     expect(systemPrompts[1]).toMatch(/implausible_distractor/);
+    handle.close();
+  });
+
+  it("rejects out-of-range bullet citations BEFORE the reviewer runs (E3 / Phase 16)", async () => {
+    let reviewerCalls = 0;
+    callClaudeMock.mockImplementation(async (params: { role: string }) => {
+      if (params.role === "generator") {
+        // Cite a bullet that doesn't exist on the seeded TS (only 2 knowledge bullets).
+        return questionMessage({
+          ...goodQuestion(),
+          knowledge_bullet_idxs: [99],
+          skills_bullet_idxs: [],
+        });
+      }
+      reviewerCalls++;
+      return reviewMessage({ verdict: "approve", summary: "ok ok ok ok" });
+    });
+
+    await expect(
+      generateOneQuestion({
+        taskStatementId: "TS1",
+        bloomLevel: 2,
+        db: handle.db,
+      }),
+    ).rejects.toMatchObject({ code: "exhausted" });
+
+    // Reviewer never runs because the bullet check failed first — saves a
+    // Claude call per failed attempt.
+    expect(reviewerCalls).toBe(0);
+
+    // Nothing persisted.
+    const inserted = handle.db
+      .select()
+      .from(schema.questions)
+      .where(eq(schema.questions.taskStatementId, "TS1"))
+      .all();
+    expect(inserted).toHaveLength(0);
     handle.close();
   });
 

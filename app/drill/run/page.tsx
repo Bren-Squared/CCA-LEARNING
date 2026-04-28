@@ -13,6 +13,7 @@ function parseScope(params: URLSearchParams): DrillScope {
   if (type === "domain" && id) return { type: "domain", id };
   if (type === "task" && id) return { type: "task", id };
   if (type === "scenario" && id) return { type: "scenario", id };
+  if (type === "due-mcq") return { type: "due-mcq" };
   return { type: "all" };
 }
 
@@ -27,6 +28,7 @@ function parseBloom(params: URLSearchParams): BloomLevel | undefined {
 
 function scopeLabel(scope: DrillScope, db: ReturnType<typeof getAppDb>): string {
   if (scope.type === "all") return "Mixed drill · all active questions";
+  if (scope.type === "due-mcq") return "Re-test queue · due MCQs (E2)";
   if (scope.type === "domain") {
     const row = db
       .select()

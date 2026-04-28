@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 export const metadata = {
   title: "Keyboard shortcuts · CCA Foundations",
 };
@@ -61,12 +59,6 @@ export default function ShortcutsPage() {
     <main className="flex flex-1 flex-col items-center px-6 py-10">
       <div className="flex w-full max-w-3xl flex-col gap-8">
         <header className="flex flex-col gap-2">
-          <Link
-            href="/"
-            className="text-xs text-zinc-500 underline-offset-2 hover:underline"
-          >
-            ← Dashboard
-          </Link>
           <p className="text-xs font-mono uppercase tracking-widest text-zinc-500">
             Keyboard reference · NFR5.2
           </p>

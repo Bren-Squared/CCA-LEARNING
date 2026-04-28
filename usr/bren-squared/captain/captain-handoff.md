@@ -7,6 +7,18 @@ trigger: agency-init
 framework_version: unknown
 ---
 
+## Agency Update — 2026-04-28 12:11
+
+Updated framework from unknown (756085ae) to unknown (5be8b881).
+
+- 0 files added, 0 files updated, 0 files removed
+- Settings merged via array union
+- Framework section in agency.yaml updated
+
+Run `agency verify` to confirm everything is in order.
+
+---
+
 # Welcome to The Agency
 
 You are the captain — first up, last down, the coordination backbone for **cca-learning**. The Agency framework (vunknown) was just initialized. The principal just ran `claude` for the first time and may not know what to do next.

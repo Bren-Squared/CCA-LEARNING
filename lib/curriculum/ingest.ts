@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { Db } from "../db";
 import { schema } from "../db";
@@ -200,11 +200,17 @@ export interface IngestCounts {
 export function countIngested(db: Db): IngestCounts {
   const count = (t: SQLiteTable) =>
     (db.select({ n: sql<number>`count(*)` }).from(t).get()?.n ?? 0) as number;
+  const seedQuestions =
+    (db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.questions)
+      .where(eq(schema.questions.source, "seed"))
+      .get()?.n ?? 0) as number;
   return {
     domains: count(schema.domains),
     taskStatements: count(schema.taskStatements),
     scenarios: count(schema.scenarios),
-    questions: count(schema.questions),
+    questions: seedQuestions,
     exercises: count(schema.preparationExercises),
   };
 }
