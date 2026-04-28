@@ -13,8 +13,8 @@ project:
 framework:
   version: "unknown"
   installed_at: "2026-04-28T16:06:42+00:00"
-  updated_at: "2026-04-28T16:06:42+00:00"
-  source_commit: "756085ae00dbd017cbc4c1b65bf3db5fc94eb1df"
+  updated_at: "2026-04-28T16:11:11+00:00"
+  source_commit: "5be8b8811a7dbeeb0d9498c948f751a497867f6f"
 
 agents:
   default_model: "opus"
