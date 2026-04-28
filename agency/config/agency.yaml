@@ -1,0 +1,43 @@
+# Agency Configuration for cca-learning
+
+principals:
+  "nimda":
+    name: "bren-squared"
+  default:
+    name: unknown
+
+project:
+  name: "cca-learning"
+  timezone: "UTC"
+
+framework:
+  version: "unknown"
+  installed_at: "2026-04-28T16:06:42+00:00"
+  updated_at: "2026-04-28T16:06:42+00:00"
+  source_commit: "756085ae00dbd017cbc4c1b65bf3db5fc94eb1df"
+
+agents:
+  default_model: "opus"
+
+methodology:
+  numbering: "phase.iteration"
+  work_pattern: "discuss-plan-review-revise-finalize-implement"
+
+sandbox:
+  principal_dirs: true
+
+worktrees:
+  enabled: true
+  base_dir: ".worktrees"
+
+secrets:
+  provider: "vault"
+
+terminal:
+  provider: "ghostty"
+
+platform:
+  provider: "auto"
+
+telemetry:
+  providers: ["jsonl"]

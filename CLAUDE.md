@@ -60,3 +60,4 @@
 
 ## External References
 @AGENTS.md
+@agency/CLAUDE-THEAGENCY.md
